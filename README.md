@@ -12,4 +12,4 @@
 - 2x8 16GB RAM
 - 1x 1Gb link
 - AMD Radeon 6600
-- 500GB SSD (zfs no RAID)
+- 500GB SSD (ZFS no RAID)
