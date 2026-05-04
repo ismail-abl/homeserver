@@ -1,0 +1,50 @@
+# ---
+# - name: Install sudo on Proxmox host
+#   hosts: proxmox_hosts
+#   gather_facts: true
+#   become: true
+#   vars_files:
+#     - ../vars/global.yml
+#   roles:
+#     - common
+
+# - name: Configure network interfaces and routing
+#   hosts: all
+#   become: yes
+
+#   tasks:
+#     - name: Ensure /etc/network/interfaces.d directory exists
+#       file:
+#         path: /etc/network/interfaces.d
+#         state: directory
+#         mode: "0755"
+
+#     - name: Set back mgmt0 to dhcp
+#       template:
+#         src: mgmt0.j2
+#         dest: /etc/network/interfaces.d/mgmt0
+#         validate: /usr/sbin/ifquery --interfaces=%s --list
+#       when: inventory_hostname in groups['hosts']
+
+#     - name: Generate the network configuration file
+#       template:
+#         src: interfaces.j2
+#         dest: /etc/network/interfaces.d/ansible-config
+#         validate: /usr/sbin/ifquery --interfaces=%s --list
+#       vars:
+#         interfaces_list: "{{ interfaces }}"
+#       notify: restart networking
+
+#   handlers:
+#     - name: restart networking
+#       service:
+#         name: networking
+#         state: restarted
+- name: le nom du playbook
+  hosts: proxmox_hosts
+  gather_facts: true
+  tasks:
+    - name: Install wget
+      apt:
+        name: wget
+        state: present
