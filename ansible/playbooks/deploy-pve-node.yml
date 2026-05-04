@@ -1,0 +1,11 @@
+---
+# Main deployment playbook for proxmox node
+# verify it has a vmbr0 bridge with a ip attributed, and access to internet -> if not tell user to do installation manually again
+# set pve community package instead of proxmox official package to avoid subscription warning
+# set dns and ntp servers
+# set hostname, hosts file, resolv.conf
+# set network ip and bridge
+# set sdn and firewall for pve env
+# download lxc template latest debian ubuntu and alpine
+# proxmox community script vm homeassistant os
+
