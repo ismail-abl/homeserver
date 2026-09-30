@@ -1,0 +1,104 @@
+---
+# Non-destructive: forms the cluster if it does not exist yet, and joins the
+# nodes that are not members. A node that already has a cluster configuration
+# is never touched, so a run against a healthy cluster changes nothing.
+#
+# Membership is read from /etc/pve/corosync.conf, not from `pvecm status`: a
+# member whose corosync is briefly down still has the file, and must not be
+# made to join again.
+- name: Check whether this node already belongs to a cluster
+  ansible.builtin.stat:
+    path: /etc/pve/corosync.conf
+  register: pve_cluster_conf
+
+- name: Form the cluster on the bootstrap node
+  when:
+    - inventory_hostname == pve_cluster_bootstrap_node
+    - not pve_cluster_conf.stat.exists
+  block:
+    - name: Ensure /etc/corosync exists
+      # `pvecm create` runs corosync-keygen, which writes here and does not
+      # create the directory. Without it the creation fails while `pvecm
+      # create` still exits 0.
+      ansible.builtin.file:
+        path: /etc/corosync
+        state: directory
+        mode: "0755"
+
+    - name: Create the cluster
+      # --link0 is declared, never inferred from name resolution.
+      ansible.builtin.command: >
+        pvecm create {{ pve_cluster_name }} --link0 {{ pve_cluster_ip }}
+        --votes {{ pve_cluster_votes }}
+      changed_when: true
+
+    - name: Assert the cluster configuration was actually written
+      # `pvecm create` exits 0 even when corosync-keygen fails, so its return
+      # code proves nothing. The file it must produce does.
+      ansible.builtin.stat:
+        path: /etc/pve/corosync.conf
+      register: pve_cluster_created_conf
+      until: pve_cluster_created_conf.stat.exists
+      retries: 6
+      delay: 5
+      failed_when: not pve_cluster_created_conf.stat.exists
+      when: not ansible_check_mode
+
+- name: Wait until the bootstrap node's cluster filesystem is quorate
+  # Not `pvecm status`: that reports corosync's quorum, which comes first.
+  # `pvecm addnode` refuses a join until pmxcfs itself is quorate, a few
+  # seconds later ("cluster not ready - no quorum?"), so wait on the very check
+  # it runs.
+  ansible.builtin.command: >-
+    perl -MPVE::Cluster -e 'exit(PVE::Cluster::check_cfs_quorum(1) ? 0 : 1)'
+  register: pve_cluster_cfs_quorum
+  until: pve_cluster_cfs_quorum.rc == 0
+  retries: 24
+  delay: 5
+  changed_when: false
+  when:
+    - inventory_hostname == pve_cluster_bootstrap_node
+    - not ansible_check_mode
+
+- name: Join the nodes that are not members yet, one at a time
+  # throttle: two simultaneous joins break quorum negotiation.
+  # `pvecm add` runs the join as a task and exits 0 even when it fails
+  # ("unable to add node: ..."), so the return code proves nothing.
+  ansible.builtin.command: >
+    pvecm add {{ hostvars[pve_cluster_bootstrap_node]['pve_cluster_node_ip'] }}
+    --use_ssh --link0 {{ pve_cluster_ip }} --votes {{ pve_cluster_votes }}
+  register: pve_cluster_join
+  failed_when: >-
+    pve_cluster_join.rc != 0
+    or 'unable to add node' in pve_cluster_join.stderr
+    or 'unable to add node' in pve_cluster_join.stdout
+  when:
+    - inventory_hostname != pve_cluster_bootstrap_node
+    - not pve_cluster_conf.stat.exists
+  throttle: 1
+  changed_when: true
+
+- name: Assert the node actually joined
+  # The only honest post-condition: the cluster configuration now exists here.
+  ansible.builtin.stat:
+    path: /etc/pve/corosync.conf
+  register: pve_cluster_joined_conf
+  until: pve_cluster_joined_conf.stat.exists
+  retries: 6
+  delay: 5
+  failed_when: not pve_cluster_joined_conf.stat.exists
+  when:
+    - inventory_hostname != pve_cluster_bootstrap_node
+    - not pve_cluster_conf.stat.exists
+    - not ansible_check_mode
+
+- name: Wait for a quorate full cluster
+  ansible.builtin.command: pvecm status
+  register: pve_cluster_final_quorum
+  until:
+    - pve_cluster_final_quorum.stdout is search('Quorate:\s+Yes')
+    - pve_cluster_final_quorum.stdout is search('Nodes:\s+' ~ pve_cluster_expected_nodes ~ '\s')
+  retries: 24
+  delay: 5
+  changed_when: false
+  when: not ansible_check_mode

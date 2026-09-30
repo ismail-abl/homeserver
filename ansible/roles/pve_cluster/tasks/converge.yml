@@ -1,0 +1,74 @@
+---
+- name: Read the cluster status
+  ansible.builtin.command: pvecm status
+  register: pve_cluster_status
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+- name: Read the cluster membership
+  ansible.builtin.command: pvecm nodes
+  register: pve_cluster_members
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+- name: Assert the cluster is formed, named and quorate
+  ansible.builtin.assert:
+    that:
+      - pve_cluster_status.rc == 0
+      - pve_cluster_status.stdout is search('Name:\s+' ~ pve_cluster_name ~ '\s')
+      - pve_cluster_status.stdout is search('Quorate:\s+Yes')
+      - pve_cluster_status.stdout is search('Nodes:\s+' ~ pve_cluster_expected_nodes ~ '\s')
+    fail_msg: >
+      No quorate {{ pve_cluster_expected_nodes }}-node cluster named {{ pve_cluster_name }}
+      on {{ inventory_hostname }}. build.yml only creates a missing cluster and joins
+      nodes that have none; a node that belongs to another cluster, or a broken one,
+      needs the destructive path: -e pve_cluster_wipe=true.
+
+- name: Assert the quorum votes match the inventory
+  # Votes are only set when a node is created or joined; the role does not edit
+  # corosync.conf on a live cluster. A mismatch here is drift to fix by hand.
+  ansible.builtin.assert:
+    that:
+      - pve_cluster_members.stdout is search('\s' ~ pve_cluster_votes ~ '\s+' ~ ansible_facts['hostname'] ~ '(\s|$)')
+      - pve_cluster_status.stdout is search('Expected votes:\s+' ~ pve_cluster_expected_votes ~ '\s')
+    fail_msg: >
+      {{ inventory_hostname }} should carry {{ pve_cluster_votes }} vote(s) and the
+      cluster should expect {{ pve_cluster_expected_votes }} in total. A node still
+      listed in corosync.conf but gone from the inventory also shows up here
+      (`pvecm delnode <name>`).
+
+- name: Check that the bootstrap node's configuration survived the wipe
+  # Only after a wipe that dissolved an existing cluster: wipe.yml recorded the
+  # "before" state on the bootstrap node, and on every other path the register
+  # is skipped.
+  when:
+    - pve_cluster_guests_before is defined
+    - pve_cluster_guests_before is not skipped
+    - not ansible_check_mode
+  block:
+    - name: List the bootstrap node's guest configurations again
+      ansible.builtin.find:
+        paths:
+          - "/etc/pve/nodes/{{ ansible_facts['hostname'] }}/lxc"
+          - "/etc/pve/nodes/{{ ansible_facts['hostname'] }}/qemu-server"
+        patterns: "*.conf"
+      register: pve_cluster_guests_after
+
+    - name: Checksum the storage configuration again
+      ansible.builtin.stat:
+        path: /etc/pve/storage.cfg
+        checksum_algorithm: sha256
+      register: pve_cluster_storage_after
+
+    - name: Assert guests and storage are unchanged
+      ansible.builtin.assert:
+        that:
+          - (pve_cluster_guests_after.files | map(attribute='path') | sort)
+            == (pve_cluster_guests_before.files | map(attribute='path') | sort)
+          - pve_cluster_storage_after.stat.checksum == pve_cluster_storage_before.stat.checksum
+        fail_msg: >
+          The bootstrap node's guests or storage.cfg changed across the wipe.
+          Restore /var/lib/pve-cluster/config.db from the config.db.bak-* written
+          by wipe.yml (see the comment there).

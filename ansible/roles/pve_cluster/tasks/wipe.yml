@@ -1,0 +1,97 @@
+---
+# DESTRUCTIVE, day 0 only: dissolves the cluster on every node, so that
+# build.yml can form it again from scratch. Runs only with
+# -e pve_cluster_wipe=true.
+#
+# Running guests keep running. This node's own /etc/pve content (its guest
+# configs under /etc/pve/nodes/<hostname>/, storage.cfg, users...) is kept, and
+# `pvecm create` on the bootstrap node reuses it; a joining node's /etc/pve is
+# replaced by the cluster's anyway. Every node backs up its config.db and
+# /etc/corosync first, and converge.yml checks that the bootstrap node's
+# guests and storage.cfg came through unchanged.
+- name: Detect an existing cluster
+  ansible.builtin.stat:
+    path: /etc/pve/corosync.conf
+  register: pve_cluster_old_conf
+
+- name: Dissolve the existing cluster
+  when: pve_cluster_old_conf.stat.exists
+  block:
+    - name: Record what the bootstrap node holds, to check it after the rebuild
+      # converge.yml compares these with the same reads once the cluster is
+      # formed again: the bootstrap node's configuration must come through
+      # the wipe untouched.
+      when: inventory_hostname == pve_cluster_bootstrap_node
+      block:
+        - name: List the bootstrap node's guest configurations
+          ansible.builtin.find:
+            paths:
+              - "/etc/pve/nodes/{{ ansible_facts['hostname'] }}/lxc"
+              - "/etc/pve/nodes/{{ ansible_facts['hostname'] }}/qemu-server"
+            patterns: "*.conf"
+          register: pve_cluster_guests_before
+
+        - name: Checksum the storage configuration
+          ansible.builtin.stat:
+            path: /etc/pve/storage.cfg
+            checksum_algorithm: sha256
+          register: pve_cluster_storage_before
+
+    - name: Stop the cluster services
+      ansible.builtin.systemd_service:
+        name: "{{ item }}"
+        state: stopped
+      loop: [pve-cluster, corosync]
+
+    - name: Back up the configuration database
+      # pmxcfs is stopped, so config.db (the whole of /etc/pve) is consistent.
+      # To roll back: stop pve-cluster and corosync, copy this file back to
+      # config.db and the corosync backup back to /etc/corosync, start both.
+      ansible.builtin.copy:
+        src: /var/lib/pve-cluster/config.db
+        dest: "/var/lib/pve-cluster/config.db.bak-{{ ansible_facts['date_time']['iso8601_basic_short'] }}"
+        remote_src: true
+        mode: "0600"
+
+    - name: Back up the corosync state
+      ansible.builtin.copy:
+        src: /etc/corosync/
+        dest: "/var/lib/pve-cluster/corosync.bak-{{ ansible_facts['date_time']['iso8601_basic_short'] }}/"
+        remote_src: true
+        mode: preserve
+
+    - name: Start pmxcfs in local mode
+      ansible.builtin.command: pmxcfs -l
+      changed_when: true
+
+    - name: Remove the cluster configuration
+      ansible.builtin.file:
+        path: /etc/pve/corosync.conf
+        state: absent
+
+    - name: Discard the old corosync state
+      ansible.builtin.file:
+        path: /etc/corosync
+        state: absent
+
+    - name: List the node directories this node knows about
+      ansible.builtin.find:
+        paths: /etc/pve/nodes
+        file_type: directory
+      register: pve_cluster_node_dirs
+
+    - name: Forget every other node
+      # /etc/pve/nodes/ is keyed by each node's hostname, not by its inventory
+      # name, so the directories are listed, not derived from the inventory.
+      # This also drops nodes that left the inventory but are still in the old
+      # cluster.
+      ansible.builtin.file:
+        path: "{{ item.path }}"
+        state: absent
+      loop: "{{ pve_cluster_node_dirs.files | rejectattr('path', 'equalto', '/etc/pve/nodes/' ~ ansible_facts['hostname']) | list }}"
+      loop_control:
+        label: "{{ item.path }}"
+
+    - name: Restart pve-cluster standalone
+      ansible.builtin.shell: killall pmxcfs; sleep 2; systemctl start pve-cluster
+      changed_when: true

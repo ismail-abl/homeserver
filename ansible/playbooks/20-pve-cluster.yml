@@ -1,0 +1,7 @@
+---
+- name: Proxmox Cluster Setup
+  hosts: pve
+  become: true
+  gather_facts: true
+  roles:
+    - pve_cluster

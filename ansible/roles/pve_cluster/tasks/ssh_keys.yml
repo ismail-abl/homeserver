@@ -1,0 +1,44 @@
+---
+# Root SSH trust between the nodes, used by `pvecm add --use_ssh` and by
+# Proxmox's own node-to-node SSH.
+
+- name: Read root's public key
+  # Proxmox's key: it generates id_rsa and adds it to authorized_keys itself.
+  ansible.builtin.slurp:
+    src: /root/.ssh/id_rsa.pub
+  register: pve_cluster_root_pub_key
+
+- name: Authorize exactly the admin workstations and the cluster nodes as root
+  # The file is a symlink into /etc/pve (pmxcfs), which refuses the chown that
+  # authorized_key does, hence copy through the symlink. Node keys come in
+  # inventory order, the order Proxmox appends them in.
+  ansible.builtin.copy:
+    dest: /root/.ssh/authorized_keys
+    follow: true
+    mode: "0600"
+    content: |
+      {% for key in pve_cluster_admin_keys %}
+      {{ key }}
+      {% endfor %}
+      {% for node in groups[pve_cluster_group] %}
+      {{ hostvars[node]['pve_cluster_root_pub_key']['content'] | b64decode | trim }}
+      {% endfor %}
+    # ssh-keygen -l skips malformed lines silently: require one key per line.
+    validate: >-
+      /bin/sh -c 'test "$(ssh-keygen -l -f "$1" | wc -l)" -eq "$(grep -c . "$1")"' sh %s
+  throttle: 1
+
+- name: Fetch ED25519 host key (for known_hosts)
+  ansible.builtin.slurp:
+    src: /etc/ssh/ssh_host_ed25519_key.pub
+  register: pve_cluster_host_key
+
+- name: Add all nodes to known_hosts
+  # Read on the node itself, not with ssh-keyscan (which trusts whoever answers).
+  ansible.builtin.known_hosts:
+    name: "{{ hostvars[item]['pve_cluster_node_ip'] }}"
+    key: "{{ hostvars[item]['pve_cluster_node_ip'] }} {{ (hostvars[item]['pve_cluster_host_key']['content'] | b64decode).strip() }}"
+    state: present
+  loop: "{{ groups[pve_cluster_group] }}"
+  loop_control:
+    label: "{{ item }}"

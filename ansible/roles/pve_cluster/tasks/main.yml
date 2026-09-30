@@ -1,0 +1,34 @@
+---
+- name: Check that every node of the cluster is in this run
+  # Each node needs every other node's keys, address and votes, so a run on
+  # part of a cluster (--limit) cannot work; without this check it would die
+  # later on an undefined variable. Several clusters are several inventory
+  # groups (pve_cluster_group), not partial runs.
+  ansible.builtin.assert:
+    that: groups[pve_cluster_group] | difference(ansible_play_hosts_all) | length == 0
+    fail_msg: >
+      pve_cluster must run on every node of group '{{ pve_cluster_group }}'.
+      Missing from this run: {{ groups[pve_cluster_group] | difference(ansible_play_hosts_all) | join(', ') }}.
+      Drop --limit, or give the other cluster its own inventory group.
+    quiet: true
+  run_once: true
+
+- name: Publish this node's cluster address and votes to the other nodes
+  # Role defaults are not visible through hostvars[<another node>]; facts are.
+  # Every task that reads another node's value uses these facts.
+  ansible.builtin.set_fact:
+    pve_cluster_node_ip: "{{ pve_cluster_ip }}"
+    pve_cluster_node_votes: "{{ pve_cluster_votes | int }}"
+
+- name: Distribute SSH keys and build known_hosts
+  ansible.builtin.import_tasks: ssh_keys.yml
+
+- name: Dissolve the existing cluster (destructive, day 0 only)
+  ansible.builtin.import_tasks: wipe.yml
+  when: pve_cluster_wipe | bool
+
+- name: Form the cluster and join missing nodes (non-destructive)
+  ansible.builtin.import_tasks: build.yml
+
+- name: Assert the cluster is in its target shape
+  ansible.builtin.import_tasks: converge.yml

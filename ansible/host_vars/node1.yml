@@ -1,0 +1,7 @@
+---
+# node1 is the historical production server; node2 joins it for cluster and
+# HA experiments. With 3 votes against 1, node1 alone holds quorum (3 of 4):
+# the experiment can be abandoned and node2 switched off without touching
+# production, while node2 alone never has quorum, so there is no split-brain.
+# The price: HA can move guests to node1, never fail node1's guests over.
+pve_cluster_votes: 3

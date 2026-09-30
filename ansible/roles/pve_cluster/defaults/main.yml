@@ -1,0 +1,36 @@
+---
+# defaults file for pve_cluster
+
+# Inventory group holding the nodes of this cluster. Several clusters are
+# several groups, each with its own pve_cluster_name; the role never runs on
+# part of a group (see the check at the top of tasks/main.yml).
+pve_cluster_group: pve
+
+# Proxmox cluster name
+pve_cluster_name: "home-cluster"
+
+# Bootstrap node: the one that creates the cluster
+pve_cluster_bootstrap_node: "{{ groups[pve_cluster_group][0] }}"
+
+# IP used for cluster traffic (Corosync link0)
+pve_cluster_ip: "{{ ansible_host }}"
+
+# Number of nodes expected in the cluster
+pve_cluster_expected_nodes: "{{ groups[pve_cluster_group] | length }}"
+
+# Safety switch for the destructive path: pass as an extra-var
+# (-e pve_cluster_wipe=true) to dissolve the cluster before it is formed again.
+# Without it the role only creates a missing cluster and joins missing nodes.
+pve_cluster_wipe: false
+
+# Quorum votes of this node. Override per host (host_vars/) to give one node
+# more weight than all the others together, so it stays quorate on its own.
+pve_cluster_votes: 1
+
+# Sum of every node's votes, i.e. what `pvecm status` must report as
+# "Expected votes". Read from the facts each node publishes (tasks/main.yml).
+pve_cluster_expected_votes: "{{ groups[pve_cluster_group] | map('extract', hostvars, 'pve_cluster_node_votes') | map('int') | sum }}"
+
+# Public keys of the admin workstations allowed to log in as root. Defined
+# once for the whole inventory (group_vars/all), shared with host_baseline.
+pve_cluster_admin_keys: "{{ ssh_admin_keys }}"
