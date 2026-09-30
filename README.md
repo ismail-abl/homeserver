@@ -1,121 +1,112 @@
-# My Home Server
+# Homeserver — Proxmox VE as code
 
-Infrastructure automation and container orchestration using Ansible and Proxmox.
+Ansible for my home Proxmox VE setup: two nodes today for HA experimenting.
+The goal is for this repository to replace my hand-built production setup
+entirely, with every change versioned, reviewable and checkable:
+`--check --diff` shows any drift between the repository and the nodes.
 
-## TODOs
+## Roadmap
 
-- [ ] Prerequisite setup on dev machine (first test ansible playbook, running script, windows + linux)
-- [ ] Setup proxmox host (first boot)
-- [ ] Network Stack
-- [ ] Prerequisite for ansible, terraform on Proxmox host
-- [ ] Check feasibility of using community-script to auto install services in containers/VMs
-- [ ] Website
-
-## Ansible Workflow
-
-Development and versioning stay on the local machine (git). Ansible execution uses a remote Linux host to avoid Windows compatibility issues with native Ansible.
-
-**Why this approach?**
-Ansible CLI can fail on native Windows with `OSError: [WinError 1] Incorrect function`. The solution: execute from a remote Linux host over SSH/SCP, keeping your source code on Windows.
-
-### Quick Start
-
-#### Option 1: Linux / WSL / macOS (Direct execution)
-
-```bash
-cd ansible
-bash ./scripts/setup-venv.sh
-source .venv/bin/activate
-ansible-playbook playbooks/install_sudo.yml
-```
-
-Or run playbook directly:
-```bash
-cd ansible
-./scripts/setup-venv.sh && ./.venv/bin/ansible-playbook playbooks/install_sudo.yml
-```
-
-**Environment variables:**
-- `PYTHON_CMD` - Python executable to use (default: `python3`)
-
-#### Option 2: Windows (Remote execution via SSH)
-
-From the `ansible/` directory:
-
-```powershell
-Set-Location c:\Users\ismail\Apps\homeserver\ansible
-.\run-ansible.ps1 playbooks/install_sudo.yml
-```
-
-Or with shorthand:
-```powershell
-.\run-ansible.ps1 playbook/install_sudo.yml
-```
-
-**What the script does:**
-1. Validates playbook exists locally
-2. Copies entire `ansible/` directory to remote host via `scp`
-3. Sets execute permission on `setup-venv.sh`
-4. Runs venv setup and ansible-playbook on remote host over SSH
-
-**Prerequisites for Windows:**
-- SSH access to remote Linux host (variable `$remoteMachine = "home"` in script)
-- `ssh`, `scp` available in PATH (Git Bash, WSL terminal, or native OpenSSH)
-
-**Configuration (edit `run-ansible.ps1`):**
-- `$remoteMachine` - SSH host/user@hostname (currently `"home"`)
-- `$remoteAnsibleFolder` - Remote directory name (currently `"homeserver"`)
-
-### Ansible Structure
-
-```
-ansible/
-├── ansible.cfg              # Ansible configuration
-├── inventory.ini            # Hosts inventory (proxmox)
-├── requirements.txt         # Python dependencies (ansible-core, etc)
-├── group_vars/
-│   └── all.yml             # Variables for all hosts
-├── host_vars/
-│   └── proxmox.yml         # Host-specific variables for proxmox
-├── vars/
-│   └── global.yml          # Global variables for playbooks
-├── roles/
-│   └── common/             # Common role (sudo, etc)
-│       ├── tasks/main.yml
-│       └── templates/
-├── playbooks/              # Playbooks
-│   └── 00-test-install-wget.yml
-├── templates/              # Shared Jinja2 templates
-├── setup-venv.sh           # Bootstrap Python venv (Linux/bash)
-└── run-ansible.ps1         # Remote launcher (Windows/PowerShell)
-```
-
-### Development Setup
-
-**On Linux/WSL/macOS:**
-1. Edit playbooks locally
-2. Test with local venv
-3. Commit to git
-4. Push to remote (Github)
-
-**On Windows:**
-1. Edit playbooks locally
-2. Commit to git
-3. Run `.\run-ansible.ps1` to test on remote host
-4. Push to remote (Github)
-
-### CV-Oriented Highlights
-
-- Designed a three-tier IaC workflow (dev workstation, remote execution runner, infrastructure targets)
-- Implemented repeatable Ansible execution pipeline from Windows to Linux over SSH/SCP
-- Standardized environment bootstrap with isolated Python virtual environments
-- Improved operational reliability by separating source control workflow from runtime pipeline
-- Applied infrastructure automation practices: idempotent playbooks, reproducible dependency setup
+- [x] Controller environment: WSL
+- [x] Inventory and smoke test (`00-ping.yml`)
+- [x] Host baseline (phase 1): APT sources (no-subscription), systemd lid switch, SSH security (key-only, prohibit-password), DNS, NTP (chrony with NTS)
+- [x] Proxmox cluster (2 nodes): create/join, weighted quorum votes, declarative root SSH trust, separate opt-in wipe path
+- [ ] Storage: ZFS on the secondary node
+- [ ] Container configs through `pct`: reverse proxy + fail2ban, SFTPGo
+- [x] Secrets with `ansible-vault`
+- [ ] Network: bridges, SDN, firewall
+- [ ] LXC templates and container provisioning
 
 ## Hardware
 
-- **CPU:** AMD Ryzen 5 3600
-- **RAM:** 2x8 GB (16 GB total)
-- **Network:** 1 Gbps link
-- **GPU:** AMD Radeon 6600
-- **Storage:** 500 GB SSD (ZFS no RAID)
+- **node1:** Lenovo laptop (AMD Ryzen 5 5500U, NVMe + 6TB USB HDD), the production node
+- **node2:** HP laptop
+- **OS:** Proxmox VE 9 (Debian 13 Trixie)
+
+## Usage
+
+**Controller.** Any Linux works (here: WSL). A venv pins the Ansible and
+ansible-lint versions per project:
+
+```bash
+sudo apt install -y python3-venv git sshpass
+cd homeserver/ansible
+./setup-linux.sh && source ~/.venvs/homeserver/bin/activate
+eval "$(ssh-agent -s)" && ssh-add ~/.ssh/id_ed25519
+export ANSIBLE_VAULT_PASSWORD_FILE="$PWD/.vault_pass"   # gitignored; or --ask-vault-pass
+ansible-playbook playbooks/00-ping.yml                  # smoke test
+```
+
+The vault holds the node addresses, so every run needs its password. On WSL
+with the repository under `/mnt/c`, mount it with `metadata` in
+`/etc/wsl.conf`, or Ansible ignores the world-writable `ansible.cfg`.
+
+**New node.** A fresh Proxmox node only has its root password. Trust its host
+key once (`ssh root@<ip> true`, checking the fingerprint on its console), then
+run the baseline with `--limit <node> --ask-pass`: it authorizes
+`ssh_admin_keys` before turning password logins off, and refuses to turn them
+off if no admin key is in place.
+
+**Every run.** Playbooks in order, `10` then `20`, each previewed then applied:
+
+```bash
+ansible-playbook playbooks/10-host-baseline.yml --check --diff   # preview, changes nothing
+ansible-playbook playbooks/10-host-baseline.yml                  # apply
+ansible-playbook playbooks/20-pve-cluster.yml --check --diff
+ansible-playbook playbooks/20-pve-cluster.yml
+```
+
+A converged setup previews `changed=0`; anything else is drift.
+
+**Options.** `--tags` / `--skip-tags` target parts of a role, e.g.
+`--tags dns_ntp` skips the `apt` part, whose dist-upgrade may reboot the node.
+`-e name=value` adjusts behaviour for one run, e.g. `-e pve_cluster_wipe=true`
+dissolves and re-forms the cluster (destructive, day 0 only).
+
+## Roles
+
+### `host_baseline`
+
+APT sources and upgrades, systemd (lid switch, sleep targets), SSH, DNS and
+NTP. Every part is tagged (`system`, `apt`, `sshd`, `dns_ntp`, `cron`,
+`subgid`), so it can be applied on its own. `apt` runs a dist-upgrade and
+reboots the node when `/var/run/reboot-required` appears, so run it node by
+node (`--limit`).
+
+- **SSH hardening is a drop-in** (`/etc/ssh/sshd_config.d/00-hardening.conf`).
+  Proxmox rewrites `PermitRootLogin yes` into `sshd_config` on every cluster
+  create/join; the drop-in is read first, and sshd keeps the first value it
+  reads.
+- **Time is authenticated (NTS)** from Netnod's NTS pool (`nts.ntp.se`), with
+  `authselectmode prefer`: the unauthenticated fallback (`ntp.metas.ch`) is used
+  only if no NTS source works. The chrony default (`mix`) would instead leave
+  the clock unsynchronised whenever the NTS sources fail.
+
+### `pve_cluster`
+
+- **Non-destructive by default.** A node without `/etc/pve/corosync.conf` is
+  joined (or, for the bootstrap node, the cluster is created); a member is
+  never touched. A healthy cluster reports `changed=0`.
+- **The destructive path is separate and opt-in** (`pve_cluster_wipe`). It backs
+  up `config.db` and `/etc/corosync` on every node, dissolves the cluster, lets
+  the normal path re-form it, then asserts that the bootstrap node's guests and
+  `storage.cfg` came through unchanged.
+- **Quorum votes are declared** (`pve_cluster_votes`, default 1). The
+  production node carries 3 of 4 votes, so it stays quorate on its own and the
+  second node can be switched off at any time.
+- **Root's `authorized_keys` is declarative**: exactly `ssh_admin_keys` plus
+  each node's root key. On Proxmox the file is a symlink into `/etc/pve`
+  (pmxcfs), where `authorized_key` cannot work (it chowns to `root:root`, which
+  pmxcfs refuses), so the whole file is written with `copy` through the symlink
+  and validated key by key first. `host_baseline` only *adds* the admin keys;
+  removals are this role's job, and since both read `ssh_admin_keys`, running
+  one playbook after the other changes nothing.
+- **Runs on the whole cluster only.** Every node needs the others' keys,
+  addresses and votes, so a partial run (`--limit`) is refused up front.
+  Another cluster is another inventory group (`pve_cluster_group`).
+- **Never trusts `pvecm`'s exit code.** `pvecm create` and `pvecm add` both exit
+  0 on failure; each is followed by a check of what it must have produced, and
+  joins wait until the bootstrap node's cluster filesystem itself is quorate.
+- **`pvecm` rather than `community.proxmox.proxmox_cluster`**: that module has
+  no quorum votes, no way to dissolve a cluster, and joins over the API with the
+  root password.
