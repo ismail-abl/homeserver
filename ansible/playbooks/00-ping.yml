@@ -1,0 +1,16 @@
+---
+# Smoke test: reach the host, gather facts, change nothing.
+#   ansible-playbook playbooks/00-ping.yml
+- name: Check that the Proxmox host is reachable
+  hosts: pve
+  gather_facts: true
+  tasks:
+    - name: Read the Proxmox VE version
+      ansible.builtin.command: pveversion
+      register: pveversion
+      changed_when: false
+      check_mode: false
+
+    - name: Report
+      ansible.builtin.debug:
+        msg: "{{ inventory_hostname }}: {{ pveversion.stdout }}, {{ ansible_distribution }} {{ ansible_distribution_version }}, kernel {{ ansible_kernel }}"

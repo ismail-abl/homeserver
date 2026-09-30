@@ -1,0 +1,16 @@
+---
+# group_vars/pve/public.yml
+# Variables specific to physical hosts (Proxmox VE)
+
+# Proxmox cluster name
+pve_cluster_name: "homeserver"
+
+# Default management network interface
+pve_management_interface: "vmbr0"
+
+# Security: prevent accidental ZFS conversion (disk wipe)
+storage_convert_zfs: false
+
+# ZFS Configuration
+storage_zfs_pool: "local-zfs"
+storage_zfs_nodes: "{{ real_hostnames['node2'] }}"
