@@ -1,0 +1,6 @@
+---
+# Tasks related to /etc/subgid for LXC unprivileged mounts
+
+- name: Check /etc/subgid
+  ansible.builtin.debug:
+    msg: "TODO: Implement /etc/subgid configuration check."

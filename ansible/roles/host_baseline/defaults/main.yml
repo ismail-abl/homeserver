@@ -1,0 +1,18 @@
+---
+# defaults file for host_baseline
+
+# Core packages the role always installs
+host_baseline_core_packages:
+  - curl
+  - wget
+  - nano
+  - vim
+  - btop
+
+# Empty by default; extra packages can be added per host or group in the inventory
+host_baseline_extra_packages: []
+
+# Public keys allowed to log in as root, added (never removed) before password
+# logins are turned off. Defined once for the whole inventory (group_vars/all),
+# shared with pve_cluster, which owns removals.
+host_baseline_admin_keys: "{{ ssh_admin_keys }}"

@@ -1,0 +1,27 @@
+---
+# Each part is tagged, so it can be applied on its own, e.g.
+#   ansible-playbook playbooks/10-host-baseline.yml --tags dns_ntp
+# without the dist-upgrade (apt), which may reboot the node.
+- name: System settings (logind, sleep targets)
+  ansible.builtin.import_tasks: system.yml
+  tags: [system]
+
+- name: APT sources, upgrade and packages
+  ansible.builtin.import_tasks: apt.yml
+  tags: [apt]
+
+- name: SSH daemon and root key
+  ansible.builtin.import_tasks: sshd.yml
+  tags: [sshd]
+
+- name: DNS and NTP
+  ansible.builtin.import_tasks: dns_ntp.yml
+  tags: [dns_ntp]
+
+- name: Cron maintenance (placeholder)
+  ansible.builtin.import_tasks: cron.yml
+  tags: [cron]
+
+- name: Subgid for LXC bind mounts (placeholder)
+  ansible.builtin.import_tasks: subgid.yml
+  tags: [subgid]

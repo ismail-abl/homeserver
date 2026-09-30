@@ -1,0 +1,7 @@
+---
+- name: Proxmox Host Baseline
+  hosts: pve
+  become: true
+  gather_facts: true
+  roles:
+    - host_baseline

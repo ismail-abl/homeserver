@@ -1,0 +1,69 @@
+---
+# Root SSH access and sshd hardening.
+# Admin keys are only added here; pve_cluster writes the full list and handles
+# removals. Both use ssh_admin_keys, so neither undoes the other.
+
+- name: Ensure root's .ssh directory exists
+  ansible.builtin.file:
+    path: /root/.ssh
+    state: directory
+    owner: root
+    group: root
+    mode: "0700"
+
+- name: Locate root's authorized_keys
+  # On Proxmox it is a symlink into /etc/pve; work on the real file, or the mode
+  # check below would look at the symlink.
+  ansible.builtin.stat:
+    path: /root/.ssh/authorized_keys
+  register: host_baseline_authorized_keys_file
+
+- name: Authorize the admin workstations' keys for root
+  # Before password logins go off, so a first run with --ask-pass works.
+  # lineinfile, as authorized_key cannot write into pmxcfs. Matched by key,
+  # not comment.
+  ansible.builtin.lineinfile:
+    path: "{{ host_baseline_authorized_keys_file.stat.lnk_source | default('/root/.ssh/authorized_keys') }}"
+    regexp: "(^|\\s){{ item.split()[1] | regex_escape }}(\\s|$)"
+    line: "{{ item }}"
+    create: true
+    mode: "0600"
+  loop: "{{ host_baseline_admin_keys }}"
+  loop_control:
+    label: "{{ item.split(' ')[-1] }}"
+  register: host_baseline_admin_keys_added
+
+- name: Read root's authorized_keys
+  ansible.builtin.slurp:
+    src: /root/.ssh/authorized_keys
+  register: host_baseline_authorized_keys
+  failed_when: false  # may not exist yet in check mode
+
+- name: Refuse to turn password logins off without an admin key in place
+  ansible.builtin.assert:
+    that: >-
+      (ansible_check_mode and host_baseline_admin_keys_added is changed)
+      or ((host_baseline_authorized_keys.content | default('') | b64decode).splitlines()
+          | select('search', '\S') | map('split') | map(attribute=1) | list
+          | intersect(host_baseline_admin_keys | map('split') | map(attribute=1) | list)
+          | length > 0)
+    fail_msg: >-
+      None of ssh_admin_keys is in root's authorized_keys on {{ inventory_hostname }};
+      turning password logins off now would lock everyone out. Nothing was hardened.
+    quiet: true
+
+- name: Harden sshd (key-only logins)
+  # A drop-in: Proxmox rewrites PermitRootLogin in sshd_config on cluster
+  # create/join, but sshd keeps the first value read and includes this first.
+  ansible.builtin.copy:
+    dest: /etc/ssh/sshd_config.d/00-hardening.conf
+    content: |
+      # Managed by Ansible (host_baseline)
+      PermitRootLogin prohibit-password
+      PasswordAuthentication no
+      KbdInteractiveAuthentication no
+    owner: root
+    group: root
+    mode: "0644"
+    validate: /usr/sbin/sshd -t -f %s
+  notify: Restart sshd

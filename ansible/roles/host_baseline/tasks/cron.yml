@@ -1,0 +1,6 @@
+---
+# Tasks related to crontab configurations
+
+- name: Check root crontab
+  ansible.builtin.debug:
+    msg: "TODO: Implement crontab check."

@@ -1,0 +1,26 @@
+# Chrony configuration for Proxmox Cluster
+# Managed by Ansible
+
+# Authenticated sources (NTS)
+pool {{ ntp_nts_pool }} iburst nts
+
+# Unauthenticated fallback
+pool {{ ntp_pool }} iburst
+
+# Prefer the NTS sources, fall back to the others only when none of them is
+# usable. The default (mix) never selects an unauthenticated source on its own,
+# so if every NTS source failed the clock would not be synchronised at all.
+authselectmode prefer
+
+# Record the rate at which the system clock gains/losses time.
+driftfile /var/lib/chrony/chrony.drift
+
+# Allow the system clock to be stepped in the first three updates
+# if its offset is larger than 1 second.
+makestep 1.0 3
+
+# Enable kernel synchronization of the real-time clock (RTC).
+rtcsync
+
+# NTS certificate handling
+ntsdumpdir /var/lib/chrony

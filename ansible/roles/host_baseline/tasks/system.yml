@@ -1,0 +1,33 @@
+---
+# System-level configurations (logind, etc.)
+
+- name: Ensure logind drop-in directory exists
+  ansible.builtin.file:
+    path: /etc/systemd/logind.conf.d
+    state: directory
+    mode: '0755'
+    owner: root
+    group: root
+
+- name: Configure logind to ignore laptop lid switch
+  ansible.builtin.copy:
+    dest: /etc/systemd/logind.conf.d/lid-ignore.conf
+    content: |
+      [Login]
+      HandleLidSwitch=ignore
+      HandleLidSwitchExternalPower=ignore
+      HandleLidSwitchDocked=ignore
+    owner: root
+    group: root
+    mode: '0644'
+  notify: Restart systemd-logind
+
+- name: Mask sleep, suspend, hibernate, and hybrid-sleep targets
+  ansible.builtin.systemd:
+    name: "{{ item }}"
+    masked: true
+  loop:
+    - sleep.target
+    - suspend.target
+    - hibernate.target
+    - hybrid-sleep.target

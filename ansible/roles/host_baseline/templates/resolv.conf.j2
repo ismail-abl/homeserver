@@ -1,0 +1,10 @@
+# DNS configuration
+# Managed by Ansible
+
+# Primary DNS server
+nameserver {{ dns_primary }}
+
+# Fallback DNS server
+nameserver {{ dns_secondary }}
+
+search {{ internal_domain }}

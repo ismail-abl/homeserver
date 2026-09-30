@@ -1,0 +1,29 @@
+---
+# public.yml (Cleartext)
+# Put non-sensitive, general variables here.
+timezone: "Europe/Zurich"
+
+# --- DNS Architecture ---
+public_domain: "myownself.ch"
+internal_domain: "lan.myownself.ch"
+
+# --- APT Mirror ---
+apt_mirror_domain: "mirror.init7.net"
+
+# --- DNS Configuration ---
+dns_primary: "192.168.1.1"
+dns_secondary: "9.9.9.9"
+
+# --- NTP Configuration ---
+# Authenticated time (NTS): Netnod's NTS pool, several servers behind one name.
+ntp_nts_pool: "nts.ntp.se"
+# Unauthenticated fallback, used only while no NTS source is usable: the Swiss
+# metrology institute (METAS).
+ntp_pool: "ntp.metas.ch"
+
+# --- SSH ---
+# Public keys of the admin workstations, allowed to log in as root on every
+# node. The single source for root's authorized_keys (role pve_cluster).
+# Public keys only: safe to publish.
+ssh_admin_keys:
+  - "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAINMNdEuq+hqUZ4xubdd3kgQB4unUuhet/hIFs62/tz+h my@key"
