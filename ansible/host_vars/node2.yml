@@ -1,0 +1,5 @@
+---
+# Without boost, short bursts no longer push the CPU past the point where the
+# laptop's embedded controller runs the fan at full speed (same load, measured:
+# 40-42 °C instead of 71-80 °C). The fan itself cannot be driven from Linux.
+host_baseline_cpu_boost: false

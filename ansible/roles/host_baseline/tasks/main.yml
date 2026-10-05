@@ -22,6 +22,10 @@
   ansible.builtin.import_tasks: swap.yml
   tags: [swap]
 
+- name: CPU frequency policy (governor, boost)
+  ansible.builtin.import_tasks: cpufreq.yml
+  tags: [cpu]
+
 - name: Cron maintenance (placeholder)
   ansible.builtin.import_tasks: cron.yml
   tags: [cron]

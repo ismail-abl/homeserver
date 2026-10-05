@@ -21,3 +21,9 @@ host_baseline_admin_keys: "{{ ssh_admin_keys }}"
 # Size of the zram swap, in MiB: a number, or a formula of the RAM (`ram`, in
 # MiB) that zram-generator evaluates at every boot.
 host_baseline_zram_size: "max(ram / 8, 1024)"
+
+# CPU frequency policy, written at every boot (tmpfiles.d) and applied live.
+# The governor must be one of the node's scaling_available_governors. Boost
+# false keeps the CPU at its base clock: a cooler, quieter laptop.
+host_baseline_cpu_governor: performance
+host_baseline_cpu_boost: true

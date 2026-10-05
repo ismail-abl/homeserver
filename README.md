@@ -79,13 +79,18 @@ dissolves and re-forms the cluster (destructive, day 0 only).
 
 APT sources and upgrades, base packages (`jq`, and `dnsmasq` for the SDN's
 DHCP with the stock service off), systemd (lid switch, sleep targets), zram
-swap, SSH, DNS and NTP. Every part is tagged (`system`, `apt`, `swap`, `sshd`,
-`dns_ntp`, `cron`, `subgid`), so it can be applied on its own. `apt` runs a
+swap, CPU frequency policy, SSH, DNS and NTP. Every part is tagged (`system`,
+`apt`, `swap`, `cpu`, `sshd`, `dns_ntp`, `cron`, `subgid`), so it can be applied
+on its own. `apt` runs a
 dist-upgrade and reboots the node when `/var/run/reboot-required` appears, so
 run it node by node (`--limit`).
 
 - **Swap is zram**, sized `max(ram / 8, 1024)` MiB by zram-generator at every
   boot (`host_baseline_zram_size`). The nodes have no swap on disk.
+- **CPU policy per node**: governor (`host_baseline_cpu_governor`, default
+  `performance`) and boost (`host_baseline_cpu_boost`, default on), written at
+  every boot and corrected live. One laptop runs without boost: its bursts drove
+  the fan to full speed.
 
 - **SSH hardening is a drop-in** (`/etc/ssh/sshd_config.d/00-hardening.conf`).
   Proxmox rewrites `PermitRootLogin yes` into `sshd_config` on every cluster
