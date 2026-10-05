@@ -8,6 +8,7 @@ host_baseline_core_packages:
   - nano
   - vim
   - btop
+  - jq
 
 # Empty by default; extra packages can be added per host or group in the inventory
 host_baseline_extra_packages: []
@@ -16,3 +17,7 @@ host_baseline_extra_packages: []
 # logins are turned off. Defined once for the whole inventory (group_vars/all),
 # shared with pve_cluster, which owns removals.
 host_baseline_admin_keys: "{{ ssh_admin_keys }}"
+
+# Size of the zram swap, in MiB: a number, or a formula of the RAM (`ram`, in
+# MiB) that zram-generator evaluates at every boot.
+host_baseline_zram_size: "max(ram / 8, 1024)"

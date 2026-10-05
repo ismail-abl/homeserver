@@ -1,0 +1,17 @@
+---
+# Swap in compressed RAM (zram): the nodes have no swap on disk. Its size is a
+# formula of the RAM, evaluated by zram-generator at every boot.
+
+- name: Install the zram generator
+  ansible.builtin.apt:
+    name: systemd-zram-generator
+    state: present
+
+- name: Configure the zram swap
+  ansible.builtin.template:
+    src: zram-generator.conf.j2
+    dest: /etc/systemd/zram-generator.conf
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Restart zram swap

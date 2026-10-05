@@ -18,6 +18,10 @@
   ansible.builtin.import_tasks: dns_ntp.yml
   tags: [dns_ntp]
 
+- name: Swap in compressed RAM (zram)
+  ansible.builtin.import_tasks: swap.yml
+  tags: [swap]
+
 - name: Cron maintenance (placeholder)
   ansible.builtin.import_tasks: cron.yml
   tags: [cron]

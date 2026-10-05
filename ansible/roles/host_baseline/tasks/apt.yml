@@ -50,3 +50,22 @@
   ansible.builtin.apt:
     name: "{{ host_baseline_core_packages + host_baseline_extra_packages }}"
     state: present
+
+# The Proxmox SDN hands out DHCP leases through dnsmasq, which it does not ship.
+# It starts its own instance per zone (dnsmasq@<zone>); the stock service would
+# answer DNS on every interface, the internet-facing one included, so it stays off.
+- name: DHCP server for the SDN
+  block:
+    - name: Install dnsmasq
+      ansible.builtin.apt:
+        name: dnsmasq
+        state: present
+      register: host_baseline_dnsmasq
+
+    - name: Keep the stock dnsmasq service off
+      ansible.builtin.systemd:
+        name: dnsmasq
+        enabled: false
+        state: stopped
+      # A check run only pretends to install it, so the unit does not exist yet.
+      when: not (ansible_check_mode and host_baseline_dnsmasq is changed)

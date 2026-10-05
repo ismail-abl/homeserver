@@ -12,6 +12,7 @@ entirely, with every change versioned, reviewable and checkable:
 - [x] Host baseline (phase 1): APT sources (no-subscription), systemd lid switch, SSH security (key-only, prohibit-password), DNS, NTP (chrony with NTS)
 - [x] Proxmox cluster (2 nodes): create/join, weighted quorum votes, declarative root SSH trust, separate opt-in wipe path
 - [ ] Storage: ZFS on the secondary node
+- [x] Swap in compressed RAM (zram)
 - [ ] Container configs through `pct`: reverse proxy + fail2ban, SFTPGo
 - [x] Secrets with `ansible-vault`
 - [ ] Network: bridges, SDN, firewall
@@ -67,11 +68,15 @@ dissolves and re-forms the cluster (destructive, day 0 only).
 
 ### `host_baseline`
 
-APT sources and upgrades, systemd (lid switch, sleep targets), SSH, DNS and
-NTP. Every part is tagged (`system`, `apt`, `sshd`, `dns_ntp`, `cron`,
-`subgid`), so it can be applied on its own. `apt` runs a dist-upgrade and
-reboots the node when `/var/run/reboot-required` appears, so run it node by
-node (`--limit`).
+APT sources and upgrades, base packages (`jq`, and `dnsmasq` for the SDN's
+DHCP with the stock service off), systemd (lid switch, sleep targets), zram
+swap, SSH, DNS and NTP. Every part is tagged (`system`, `apt`, `swap`, `sshd`,
+`dns_ntp`, `cron`, `subgid`), so it can be applied on its own. `apt` runs a
+dist-upgrade and reboots the node when `/var/run/reboot-required` appears, so
+run it node by node (`--limit`).
+
+- **Swap is zram**, sized `max(ram / 8, 1024)` MiB by zram-generator at every
+  boot (`host_baseline_zram_size`). The nodes have no swap on disk.
 
 - **SSH hardening is a drop-in** (`/etc/ssh/sshd_config.d/00-hardening.conf`).
   Proxmox rewrites `PermitRootLogin yes` into `sshd_config` on every cluster

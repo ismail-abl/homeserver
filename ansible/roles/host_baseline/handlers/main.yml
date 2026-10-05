@@ -34,3 +34,20 @@
     test_command: whoami
   when: host_baseline_reboot_required.stat.exists | default(false)
   listen: "Evaluate Reboot"
+
+# The generator turns its configuration into units at daemon-reload; the setup
+# service (re)creates the device, and the swap unit is started on top of it.
+- name: Recreate the zram device
+  ansible.builtin.systemd:
+    name: systemd-zram-setup@zram0.service
+    state: restarted
+    daemon_reload: true
+  listen: Restart zram swap
+  when: not ansible_check_mode
+
+- name: Start the zram swap
+  ansible.builtin.systemd:
+    name: dev-zram0.swap
+    state: started
+  listen: Restart zram swap
+  when: not ansible_check_mode
