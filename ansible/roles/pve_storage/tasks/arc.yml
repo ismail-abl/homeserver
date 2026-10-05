@@ -19,11 +19,28 @@
     src: /sys/module/zfs/parameters/zfs_arc_max
   register: pve_storage_arc_live
 
+- name: Compare the live ARC maximum with the wanted one
+  ansible.builtin.set_fact:
+    pve_storage_arc_drift: >-
+      {{ (pve_storage_arc_live.content | b64decode | trim | int)
+         != (pve_storage_arc_max_mib | int * 1048576) }}
+
 - name: Apply the ARC maximum live
   ansible.builtin.command:
     cmd: tee /sys/module/zfs/parameters/zfs_arc_max
     stdin: "{{ pve_storage_arc_max_mib | int * 1048576 }}"
-  when: >-
-    (pve_storage_arc_live.content | b64decode | trim | int)
-    != (pve_storage_arc_max_mib | int * 1048576)
+  when:
+    - pve_storage_arc_drift | bool
+    - not ansible_check_mode
+  changed_when: true
+
+- name: Report the live drift (check mode)
+  # Check mode skips commands, so the task above would not show the drift.
+  ansible.builtin.debug:
+    msg: >-
+      Live ARC maximum {{ pve_storage_arc_live.content | b64decode | trim }} would be set
+      to {{ pve_storage_arc_max_mib | int * 1048576 }}.
+  when:
+    - pve_storage_arc_drift | bool
+    - ansible_check_mode
   changed_when: true
