@@ -7,3 +7,10 @@ pve_cluster_name: "homeserver"
 
 # Default management network interface
 pve_management_interface: "vmbr0"
+
+# CPU frequency policy for every node (host_baseline). Without boost, short
+# bursts no longer push the CPU past the point where a laptop's embedded
+# controller runs the fan at full speed (measured on one node, same load:
+# 40-42 °C instead of 71-80 °C); the fan itself cannot be driven from Linux.
+host_baseline_cpu_governor: schedutil
+host_baseline_cpu_boost: false

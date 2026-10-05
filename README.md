@@ -89,8 +89,8 @@ run it node by node (`--limit`).
   boot (`host_baseline_zram_size`). The nodes have no swap on disk.
 - **CPU policy per node**: governor (`host_baseline_cpu_governor`, default
   `performance`) and boost (`host_baseline_cpu_boost`, default on), written at
-  every boot and corrected live. One laptop runs without boost: its bursts drove
-  the fan to full speed.
+  every boot and corrected live. The nodes run `schedutil` without boost
+  (`group_vars/pve`): boost bursts drove a laptop's fan to full speed.
 
 - **SSH hardening is a drop-in** (`/etc/ssh/sshd_config.d/00-hardening.conf`).
   Proxmox rewrites `PermitRootLogin yes` into `sshd_config` on every cluster
