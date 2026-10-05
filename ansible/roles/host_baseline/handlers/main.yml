@@ -35,13 +35,24 @@
   when: host_baseline_reboot_required.stat.exists | default(false)
   listen: "Evaluate Reboot"
 
-# The generator turns its configuration into units at daemon-reload; the setup
-# service (re)creates the device, and the swap unit is started on top of it.
-- name: Recreate the zram device
+# Reconfiguring zram is stop, then one start. A restart of the setup service
+# races with the swap unit it restarts in turn (and with udev events from the
+# reformatted device): several starts of dev-zram0.swap hit its start limit and
+# the device stays busy. Stopping the swap stops the setup service too (it is
+# bound to the swap) and resets the device; the single start then sets it up
+# again from the new configuration.
+- name: Stop the zram swap
   ansible.builtin.systemd:
-    name: systemd-zram-setup@zram0.service
-    state: restarted
-    daemon_reload: true
+    name: dev-zram0.swap
+    state: stopped
+  listen: Restart zram swap
+  when: not ansible_check_mode
+
+- name: Clear the zram units' failed state
+  # A failed or rate-limited unit refuses to start until reset.
+  ansible.builtin.command: systemctl reset-failed dev-zram0.swap systemd-zram-setup@zram0.service
+  changed_when: false
+  failed_when: false
   listen: Restart zram swap
   when: not ansible_check_mode
 
@@ -49,5 +60,6 @@
   ansible.builtin.systemd:
     name: dev-zram0.swap
     state: started
+    daemon_reload: true
   listen: Restart zram swap
   when: not ansible_check_mode
