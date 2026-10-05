@@ -1,0 +1,31 @@
+---
+# defaults file for pve_storage
+
+# The ZFS pool for guest disks, and the Proxmox storage ID that declares it.
+# One name for both, on every node: replication and migration need the same
+# storage on each side.
+pve_storage_pool: pve-data
+
+# GPT name of the pool's partition. The role finds the partition by this name,
+# never by its number or by its disk's name.
+pve_storage_partlabel: "zfs-{{ pve_storage_pool }}"
+
+# Guard: the free block at the end of the system disk must be at least this
+# big, or nothing is created.
+pve_storage_min_free_gib: 64
+
+# Passed to Proxmox's pool creation (pvesh .../disks/zfs).
+pve_storage_ashift: 12
+pve_storage_compression: "on"
+
+# Thin provisioning of guest volumes.
+pve_storage_sparse: true
+
+# ZFS ARC maximum, in MiB. A fixed value, since ZFS takes no formula: raise it
+# per host or group along with the RAM (about 2048 for 16 GB).
+pve_storage_arc_max_mib: 1024
+
+# A pool last imported by another system (a reinstall gives the node a new
+# hostid) is imported only when this is set for the run:
+#   -e pve_storage_force_import=true
+pve_storage_force_import: false

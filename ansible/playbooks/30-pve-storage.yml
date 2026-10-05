@@ -1,0 +1,10 @@
+---
+- name: Proxmox Storage
+  hosts: pve
+  become: true
+  gather_facts: true
+  # One node at a time: storage.cfg is shared by the cluster, and each node
+  # reads the storage entry, then adds itself to its node list.
+  serial: 1
+  roles:
+    - pve_storage

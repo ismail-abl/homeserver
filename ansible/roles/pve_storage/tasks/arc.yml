@@ -1,0 +1,29 @@
+---
+# The ARC is ZFS's read cache in RAM. Its maximum is a fixed number of bytes
+# (ZFS takes no formula): read from modprobe.d when the module loads, and
+# applied live here so that no reboot is needed.
+
+- name: Set the ARC maximum for module load
+  # The Proxmox installer writes this file too (10 % of the RAM).
+  ansible.builtin.copy:
+    dest: /etc/modprobe.d/zfs.conf
+    content: |
+      # Managed by Ansible (pve_storage)
+      options zfs zfs_arc_max={{ pve_storage_arc_max_mib | int * 1048576 }}
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Read the live ARC maximum
+  ansible.builtin.slurp:
+    src: /sys/module/zfs/parameters/zfs_arc_max
+  register: pve_storage_arc_live
+
+- name: Apply the ARC maximum live
+  ansible.builtin.command:
+    cmd: tee /sys/module/zfs/parameters/zfs_arc_max
+    stdin: "{{ pve_storage_arc_max_mib | int * 1048576 }}"
+  when: >-
+    (pve_storage_arc_live.content | b64decode | trim | int)
+    != (pve_storage_arc_max_mib | int * 1048576)
+  changed_when: true

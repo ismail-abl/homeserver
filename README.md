@@ -11,7 +11,7 @@ entirely, with every change versioned, reviewable and checkable:
 - [x] Inventory and smoke test (`00-ping.yml`)
 - [x] Host baseline (phase 1): APT sources (no-subscription), systemd lid switch, SSH security (key-only, prohibit-password), DNS, NTP (chrony with NTS)
 - [x] Proxmox cluster (2 nodes): create/join, weighted quorum votes, declarative root SSH trust, separate opt-in wipe path
-- [ ] Storage: ZFS on the secondary node
+- [x] Storage: a ZFS pool for guest disks on every node, declared as one Proxmox storage
 - [x] Swap in compressed RAM (zram)
 - [ ] Container configs through `pct`: reverse proxy + fail2ban, SFTPGo
 - [x] Secrets with `ansible-vault`
@@ -42,19 +42,28 @@ The vault holds the node addresses, so every run needs its password. On WSL
 with the repository under `/mnt/c`, mount it with `metadata` in
 `/etc/wsl.conf`, or Ansible ignores the world-writable `ansible.cfg`.
 
+**Installation.** ext4, and in the disk options `hdsize 128`, `swapsize 0`,
+`maxroot 128`, `minfree 0`, `maxvz 0`: the end of the disk stays unpartitioned
+for the guest pool. The installer sizes the root itself (`maxroot` only caps
+it), so extend it over its volume group afterwards:
+`lvextend -r -l +100%FREE pve/root`.
+
 **New node.** A fresh Proxmox node only has its root password. Trust its host
 key once (`ssh root@<ip> true`, checking the fingerprint on its console), then
 run the baseline with `--limit <node> --ask-pass`: it authorizes
 `ssh_admin_keys` before turning password logins off, and refuses to turn them
 off if no admin key is in place.
 
-**Every run.** Playbooks in order, `10` then `20`, each previewed then applied:
+**Every run.** Playbooks in order, `10`, `20` then `30`, each previewed then
+applied:
 
 ```bash
 ansible-playbook playbooks/10-host-baseline.yml --check --diff   # preview, changes nothing
 ansible-playbook playbooks/10-host-baseline.yml                  # apply
 ansible-playbook playbooks/20-pve-cluster.yml --check --diff
 ansible-playbook playbooks/20-pve-cluster.yml
+ansible-playbook playbooks/30-pve-storage.yml --check --diff
+ansible-playbook playbooks/30-pve-storage.yml
 ```
 
 A converged setup previews `changed=0`; anything else is drift.
@@ -115,3 +124,21 @@ run it node by node (`--limit`).
 - **`pvecm` rather than `community.proxmox.proxmox_cluster`**: that module has
   no quorum votes, no way to dissolve a cluster, and joins over the API with the
   root password.
+
+### `pve_storage`
+
+- **One pool for guest disks, `pve-data`, also the storage ID**, in its own
+  partition at the unpartitioned end of the system disk. The partition is found
+  by its GPT name (`zfs-pve-data`), so a reinstall of Proxmox leaves the pool
+  intact and the role imports it again. ZFS refuses a pool last used by another
+  system (a reinstall changes the hostid): the role stops and says so, and
+  `-e pve_storage_force_import=true` imports it.
+- **Proxmox's own tools.** `pvesh .../disks/zfs` creates the pool and enables
+  its import at boot; `pvesm` declares the storage, and each node adds itself to
+  its node list, one node at a time (`serial: 1`).
+- **Guarded.** Nothing is created unless exactly one disk carries `/`, its
+  largest free block ends the disk and holds at least
+  `pve_storage_min_free_gib`, and no pool of that name exists elsewhere. A
+  storage of that name that is not this pool is never rewritten.
+- **ARC maximum** `pve_storage_arc_max_mib` (1024 MiB), written to
+  `modprobe.d` and applied live; raise it per host or group with the RAM.
