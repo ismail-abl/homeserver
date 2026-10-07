@@ -1,0 +1,8 @@
+---
+- name: Proxmox Access
+  hosts: pve
+  become: true
+  # Nothing in the role needs facts; it runs once for the whole cluster.
+  gather_facts: false
+  roles:
+    - pve_access

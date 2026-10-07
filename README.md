@@ -13,6 +13,7 @@ entirely, with every change versioned, reviewable and checkable:
 - [x] Proxmox cluster (2 nodes): create/join, weighted quorum votes, declarative root SSH trust, separate opt-in wipe path
 - [x] Storage: a ZFS pool for guest disks on every node, declared as one Proxmox storage
 - [x] Swap in compressed RAM (zram)
+- [x] Access: groups, a custom guest-operator role, users without stored passwords, pools, ACLs
 - [ ] Container configs through `pct`: reverse proxy + fail2ban, SFTPGo
 - [x] Secrets with `ansible-vault`
 - [ ] Network: bridges, SDN, firewall
@@ -54,7 +55,7 @@ run the baseline with `--limit <node> --ask-pass`: it authorizes
 `ssh_admin_keys` before turning password logins off, and refuses to turn them
 off if no admin key is in place.
 
-**Every run.** Playbooks in order, `10`, `20` then `30`, each previewed then
+**Every run.** Playbooks in order, `10`, `20`, `30` then `40`, each previewed then
 applied:
 
 ```bash
@@ -64,6 +65,8 @@ ansible-playbook playbooks/20-pve-cluster.yml --check --diff
 ansible-playbook playbooks/20-pve-cluster.yml
 ansible-playbook playbooks/30-pve-storage.yml --check --diff
 ansible-playbook playbooks/30-pve-storage.yml
+ansible-playbook playbooks/40-pve-access.yml --check --diff
+ansible-playbook playbooks/40-pve-access.yml
 ```
 
 A converged setup previews `changed=0`; anything else is drift.
@@ -147,3 +150,26 @@ run it node by node (`--limit`).
   storage of that name that is not this pool is never rewritten.
 - **ARC maximum** `pve_storage_arc_max_mib` (1024 MiB), written to
   `modprobe.d` and applied live; raise it per host or group with the RAM.
+
+### `pve_access`
+
+- **Rights go to groups, never to users.** `admins` (Administrator on `/`),
+  `operators` (the custom role `VMOperator` on guests, the storages and
+  networks they use, node and pool views) and `viewers` (PVEAuditor, empty,
+  ready for a monitoring client). Groups, users, ACLs and the pools are
+  declared in `group_vars/pve`; `pve_pools` is the single list of guests per
+  pool, which other roles reuse.
+- **`VMOperator`** is `PVEVMAdmin` plus what a guest needs to exist (storage
+  space, a bridge or vnet, node and pool views): full control of every guest,
+  no node shell, no user, cluster, datacenter or node firewall, or storage
+  settings (a guest's own firewall is part of the guest).
+- **No password is stored.** Users are created without one; each is typed once
+  with `pveum passwd`. TOTP is optional and enrolled by hand in the web UI if
+  wanted (it cannot be declared).
+- **Declares, never deletes.** It creates and corrects what it declares (a
+  custom role's privileges, comments, user e-mail, group membership, pool members) and
+  leaves everything else alone, including users made by hand and `root@pam`.
+- **Runs once for the cluster.** Proxmox keeps all of this in `/etc/pve`,
+  shared by every node: the role reads it from one node, works out the
+  differences, applies one `pveum` command per difference, reads again and
+  asserts nothing is left. `--check` prints the differences it would apply.

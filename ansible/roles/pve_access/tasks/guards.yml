@@ -1,0 +1,51 @@
+---
+# Refuse a declaration that cannot be applied whole, before any write.
+
+- name: Refuse a pool member that is not a guest of the cluster
+  ansible.builtin.assert:
+    that: pve_access_unknown_guests | length == 0
+    fail_msg: >-
+      pve_pools names VMIDs that are no guest of the cluster:
+      {{ pve_access_unknown_guests | join(', ') }}. Nothing was changed.
+    quiet: true
+  vars:
+    pve_access_unknown_guests: >-
+      {{ pve_access_pools | map(attribute='vmids') | flatten
+         | difference(pve_access_have_guest_pools | list) }}
+
+- name: Refuse a guest declared in two pools
+  ansible.builtin.assert:
+    that: pve_access_all_vmids | length == pve_access_all_vmids | unique | length
+    fail_msg: >-
+      A guest can be in one pool only; these VMIDs are declared more than once:
+      {% for vmid in pve_access_all_vmids | unique
+            if pve_access_all_vmids | select('eq', vmid) | list | length > 1 %}{{ vmid }}{{ '' if loop.last else ', ' }}{% endfor %}.
+      Nothing was changed.
+    quiet: true
+  vars:
+    pve_access_all_vmids: "{{ pve_access_pools | map(attribute='vmids') | flatten }}"
+
+- name: Refuse a group that is not declared
+  ansible.builtin.assert:
+    that: pve_access_unknown_groups | length == 0
+    fail_msg: >-
+      Users or ACLs name groups missing from pve_access_groups:
+      {{ pve_access_unknown_groups | join(', ') }}. Nothing was changed.
+    quiet: true
+  vars:
+    pve_access_unknown_groups: >-
+      {{ (pve_access_users | map(attribute='groups') | flatten
+          + pve_access_acls | map(attribute='group') | list) | unique
+         | difference(pve_access_groups | map(attribute='name')) }}
+
+- name: Refuse an ACL whose role neither exists nor is declared
+  ansible.builtin.assert:
+    that: pve_access_unknown_roles | length == 0
+    fail_msg: >-
+      ACLs name roles Proxmox does not have and pve_access_roles does not
+      declare: {{ pve_access_unknown_roles | join(', ') }}. Nothing was changed.
+    quiet: true
+  vars:
+    pve_access_unknown_roles: >-
+      {{ pve_access_acls | map(attribute='role') | unique
+         | difference(pve_access_have_privs | list + pve_access_roles | map(attribute='name') | list) }}

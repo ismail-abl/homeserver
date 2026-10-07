@@ -1,0 +1,118 @@
+---
+# What Proxmox has, and what a run must change to reach the declaration.
+# Read-only: runs in check mode too, and once more after the changes to prove
+# them (tasks/main.yml).
+
+- name: Read roles, groups, users, ACLs, pools and guests
+  ansible.builtin.command:
+    argv: "{{ ['pvesh', 'get'] + item.args + ['--output-format', 'json'] }}"
+  loop:
+    - { name: roles, args: [/access/roles] }
+    - { name: groups, args: [/access/groups] }
+    # --full: without it the list leaves out each user's groups.
+    - { name: users, args: [/access/users, --full, "1"] }
+    - { name: acl, args: [/access/acl] }
+    - { name: pools, args: [/pools] }
+    - { name: guests, args: [/cluster/resources, --type, vm] }
+  loop_control:
+    label: "{{ item.name }}"
+  register: pve_access_read
+  changed_when: false
+  check_mode: false
+
+- name: Index what Proxmox has
+  ansible.builtin.set_fact:
+    pve_access_have: >-
+      {{ dict(pve_access_read.results | map(attribute='item.name')
+              | zip(pve_access_read.results | map(attribute='stdout') | map('from_json'))) }}
+
+- name: Index it by name
+  # A field Proxmox leaves out reads as ''; one it sets to null reads as None,
+  # so every use below goes through "or ''".
+  ansible.builtin.set_fact:
+    pve_access_have_privs: >-
+      {{ dict(pve_access_have.roles | map(attribute='roleid')
+              | zip(pve_access_have.roles | map(attribute='privs', default=''))) }}
+    pve_access_have_group_comments: >-
+      {{ dict(pve_access_have.groups | map(attribute='groupid')
+              | zip(pve_access_have.groups | map(attribute='comment', default=''))) }}
+    pve_access_have_user_groups: >-
+      {{ dict(pve_access_have.users | map(attribute='userid')
+              | zip(pve_access_have.users | map(attribute='groups', default=''))) }}
+    pve_access_have_user_emails: >-
+      {{ dict(pve_access_have.users | map(attribute='userid')
+              | zip(pve_access_have.users | map(attribute='email', default=''))) }}
+    pve_access_have_pool_comments: >-
+      {{ dict(pve_access_have.pools | map(attribute='poolid')
+              | zip(pve_access_have.pools | map(attribute='comment', default=''))) }}
+    pve_access_have_guest_pools: >-
+      {{ dict(pve_access_have.guests | map(attribute='vmid')
+              | zip(pve_access_have.guests | map(attribute='pool', default=''))) }}
+
+- name: Work out what a run must change
+  # The keys of the index maps above double as the list of what exists.
+  ansible.builtin.set_fact:
+    pve_access_todo:
+      roles_add: "{{ pve_access_roles | rejectattr('name', 'in', pve_access_have_privs) | list }}"
+      roles_set: >-
+        {%- set ns = namespace(out=[]) -%}
+        {%- for role in pve_access_roles if role.name in pve_access_have_privs
+              and (pve_access_have_privs[role.name] or '').split(',') | sort != role.privs | sort -%}
+        {%- set ns.out = ns.out + [role] -%}
+        {%- endfor -%}
+        {{ ns.out }}
+      groups_add: "{{ pve_access_groups | rejectattr('name', 'in', pve_access_have_group_comments) | list }}"
+      groups_set: >-
+        {%- set ns = namespace(out=[]) -%}
+        {%- for group in pve_access_groups if group.name in pve_access_have_group_comments
+              and (pve_access_have_group_comments[group.name] or '') != group.comment | default('') -%}
+        {%- set ns.out = ns.out + [group] -%}
+        {%- endfor -%}
+        {{ ns.out }}
+      users_add: "{{ pve_access_users | rejectattr('userid', 'in', pve_access_have_user_groups) | list }}"
+      users_groups: >-
+        {%- set ns = namespace(out=[]) -%}
+        {%- for user in pve_access_users if user.userid in pve_access_have_user_groups -%}
+        {%- set missing = user.groups | difference((pve_access_have_user_groups[user.userid] or '').split(',')) -%}
+        {%- if missing -%}
+        {%- set ns.out = ns.out + [{'userid': user.userid, 'groups': missing}] -%}
+        {%- endif -%}
+        {%- endfor -%}
+        {{ ns.out }}
+      users_email: >-
+        {%- set ns = namespace(out=[]) -%}
+        {%- for user in pve_access_users if user.userid in pve_access_have_user_emails
+              and user.email is defined
+              and (pve_access_have_user_emails[user.userid] or '') != user.email -%}
+        {%- set ns.out = ns.out + [user] -%}
+        {%- endfor -%}
+        {{ ns.out }}
+      pools_add: "{{ pve_access_pools | rejectattr('name', 'in', pve_access_have_pool_comments) | list }}"
+      pools_set: >-
+        {%- set ns = namespace(out=[]) -%}
+        {%- for pool in pve_access_pools if pool.name in pve_access_have_pool_comments
+              and (pve_access_have_pool_comments[pool.name] or '') != pool.comment | default('') -%}
+        {%- set ns.out = ns.out + [pool] -%}
+        {%- endfor -%}
+        {{ ns.out }}
+      pool_members: >-
+        {%- set ns = namespace(out=[]) -%}
+        {%- for pool in pve_access_pools -%}
+        {%- set moving = namespace(vms=[]) -%}
+        {%- for vmid in pool.vmids if (pve_access_have_guest_pools[vmid] | default('', true)) != pool.name -%}
+        {%- set moving.vms = moving.vms + [vmid] -%}
+        {%- endfor -%}
+        {%- if moving.vms -%}
+        {%- set ns.out = ns.out + [{'name': pool.name, 'vms': moving.vms}] -%}
+        {%- endif -%}
+        {%- endfor -%}
+        {{ ns.out }}
+      acls: >-
+        {%- set ns = namespace(out=[]) -%}
+        {%- for acl in pve_access_acls if pve_access_have.acl
+              | selectattr('type', 'eq', 'group') | selectattr('ugid', 'eq', acl.group)
+              | selectattr('path', 'eq', acl.path) | selectattr('roleid', 'eq', acl.role)
+              | selectattr('propagate', 'eq', 1) | list | length == 0 -%}
+        {%- set ns.out = ns.out + [acl] -%}
+        {%- endfor -%}
+        {{ ns.out }}

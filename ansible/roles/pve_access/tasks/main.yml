@@ -1,0 +1,59 @@
+---
+# Users, groups, roles, ACLs and pools live in /etc/pve, which every node
+# shares: the role runs once, from the first node of the play.
+- name: Declare the cluster's access configuration
+  run_once: true
+  vars:
+    # What is left to do, users by userid only (their e-mail comes from the
+    # vault). Evaluated lazily: the assert sees the fact of the second read.
+    pve_access_todo_shown: >-
+      {{ pve_access_todo | combine({'users_add': pve_access_todo.users_add | map(attribute='userid') | list,
+      'users_email': pve_access_todo.users_email | map(attribute='userid') | list})
+      | dict2items | rejectattr('value', 'eq', []) | items2dict }}
+  block:
+    - name: Read the cluster's quorum
+      ansible.builtin.command: pvesh get /cluster/status --output-format json
+      register: pve_access_cluster_status
+      changed_when: false
+      check_mode: false
+
+    - name: Refuse unless the cluster can take writes
+      # Without quorum /etc/pve is read-only and every pveum call would fail
+      # half way through. A standalone node (no cluster entry) passes: its
+      # /etc/pve is writable.
+      ansible.builtin.assert:
+        that: >-
+          pve_access_cluster_status.stdout | from_json
+          | selectattr('type', 'eq', 'cluster') | map(attribute='quorate')
+          | first | default(1) | int == 1
+        fail_msg: The cluster is not quorate; /etc/pve is read-only. Nothing was changed.
+        quiet: true
+
+    - name: Read the current state
+      ansible.builtin.import_tasks: state.yml
+
+    - name: Check the declaration
+      ansible.builtin.import_tasks: guards.yml
+
+    - name: Report what a real run would change
+      ansible.builtin.debug:
+        msg: "{{ pve_access_todo_shown }}"
+      changed_when: true
+      when:
+        - ansible_check_mode
+        - pve_access_todo.values() | select | list | length > 0
+
+    - name: Apply the differences
+      ansible.builtin.import_tasks: apply.yml
+
+    - name: Read the state again
+      ansible.builtin.import_tasks: state.yml
+      when: not ansible_check_mode
+
+    - name: Assert nothing is left to change
+      ansible.builtin.assert:
+        that: pve_access_todo.values() | select | list | length == 0
+        fail_msg: >-
+          Still different after the run: {{ pve_access_todo_shown }}
+        quiet: true
+      when: not ansible_check_mode

@@ -14,3 +14,53 @@ pve_management_interface: "vmbr0"
 # 40-42 °C instead of 71-80 °C); the fan itself cannot be driven from Linux.
 host_baseline_cpu_governor: schedutil
 host_baseline_cpu_boost: false
+
+# --- Pools: every guest, declared once ---
+# pve_access creates the pools and puts the guests in them; the replication
+# and backup roles select guests by pool. VMIDs only.
+pve_pools:
+  - name: media
+    comment: Media stack
+    vmids: [201, 202, 203, 204, 205, 206]
+  - name: infra
+    comment: Reverse proxy, DNS, file transfer
+    vmids: [199, 200, 999]
+  - name: domotique
+    comment: Home automation
+    vmids: [1000]
+  - name: lab
+    comment: Experiments and stopped guests
+    vmids: [100, 101, 105, 1001]
+
+# --- Access (pve_access): rights go to groups, never to users ---
+pve_access_groups:
+  - name: admins
+    comment: Full administration
+  - name: operators
+    comment: Every guest; no node, cluster or user settings
+  - name: viewers
+    comment: Read-only, for monitoring clients
+
+# Created without a password: each is typed once by hand (pveum passwd) and
+# stored nowhere.
+pve_access_users:
+  - userid: ismail.admin@pve
+    groups: [admins]
+    email: "{{ admin_email }}"
+  - userid: ismail@pve
+    groups: [operators]
+    email: "{{ admin_email }}"
+
+# VMOperator only means something where its privileges are checked: guests
+# (/vms), the storages a guest uses, the networks a NIC attaches to (every
+# zone, including the plain bridges of 'localnetwork'), node status (Sys.Audit)
+# and pools (Pool.Audit).
+pve_access_acls:
+  - { path: /, group: admins, role: Administrator }
+  - { path: /, group: viewers, role: PVEAuditor }
+  - { path: /vms, group: operators, role: VMOperator }
+  - { path: /storage/pve-data, group: operators, role: VMOperator }
+  - { path: /storage/local, group: operators, role: VMOperator }
+  - { path: /sdn/zones, group: operators, role: VMOperator }
+  - { path: /nodes, group: operators, role: VMOperator }
+  - { path: /pool, group: operators, role: VMOperator }

@@ -1,0 +1,99 @@
+---
+# One command per difference found by state.yml, in dependency order: roles
+# and groups before the users and ACLs that name them, pools before their
+# members. In check mode Ansible skips them all; main.yml reports instead.
+
+- name: Create the custom roles
+  ansible.builtin.command:
+    argv: [pveum, role, add, "{{ item.name }}", --privs, "{{ item.privs | join(',') }}"]
+  loop: "{{ pve_access_todo.roles_add }}"
+  loop_control:
+    label: "{{ item.name }}"
+  changed_when: true
+
+- name: Set the custom roles' privileges
+  # Without --append, --privs replaces the whole list.
+  ansible.builtin.command:
+    argv: [pveum, role, modify, "{{ item.name }}", --privs, "{{ item.privs | join(',') }}"]
+  loop: "{{ pve_access_todo.roles_set }}"
+  loop_control:
+    label: "{{ item.name }}"
+  changed_when: true
+
+- name: Create the groups
+  ansible.builtin.command:
+    argv: [pveum, group, add, "{{ item.name }}", --comment, "{{ item.comment | default('') }}"]
+  loop: "{{ pve_access_todo.groups_add }}"
+  loop_control:
+    label: "{{ item.name }}"
+  changed_when: true
+
+- name: Set the groups' comments
+  ansible.builtin.command:
+    argv: [pveum, group, modify, "{{ item.name }}", --comment, "{{ item.comment | default('') }}"]
+  loop: "{{ pve_access_todo.groups_set }}"
+  loop_control:
+    label: "{{ item.name }}"
+  changed_when: true
+
+- name: Create the users, without a password
+  # The password is typed once by hand (pveum passwd), stored nowhere, and
+  # never touched by this role. Until then the user cannot log in.
+  ansible.builtin.command:
+    argv: >-
+      {{ ['pveum', 'user', 'add', item.userid, '--groups', item.groups | join(',')]
+         + (['--email', item.email] if item.email is defined else []) }}
+  loop: "{{ pve_access_todo.users_add }}"
+  loop_control:
+    label: "{{ item.userid }}"
+  changed_when: true
+
+- name: Add the users to their missing groups
+  # --append keeps the groups given by hand.
+  ansible.builtin.command:
+    argv: [pveum, user, modify, "{{ item.userid }}", --groups, "{{ item.groups | join(',') }}", --append, "1"]
+  loop: "{{ pve_access_todo.users_groups }}"
+  loop_control:
+    label: "{{ item.userid }}"
+  changed_when: true
+
+- name: Set the users' e-mail
+  ansible.builtin.command:
+    argv: [pveum, user, modify, "{{ item.userid }}", --email, "{{ item.email }}"]
+  loop: "{{ pve_access_todo.users_email }}"
+  loop_control:
+    label: "{{ item.userid }}"
+  changed_when: true
+
+- name: Create the pools
+  ansible.builtin.command:
+    argv: [pveum, pool, add, "{{ item.name }}", --comment, "{{ item.comment | default('') }}"]
+  loop: "{{ pve_access_todo.pools_add }}"
+  loop_control:
+    label: "{{ item.name }}"
+  changed_when: true
+
+- name: Set the pools' comments
+  ansible.builtin.command:
+    argv: [pveum, pool, modify, "{{ item.name }}", --comment, "{{ item.comment | default('') }}"]
+  loop: "{{ pve_access_todo.pools_set }}"
+  loop_control:
+    label: "{{ item.name }}"
+  changed_when: true
+
+- name: Put the guests in their pools
+  # --allow-move: a guest found in another pool moves to the declared one.
+  ansible.builtin.command:
+    argv: [pveum, pool, modify, "{{ item.name }}", --vms, "{{ item.vms | join(',') }}", --allow-move, "1"]
+  loop: "{{ pve_access_todo.pool_members }}"
+  loop_control:
+    label: "{{ item.name }}: {{ item.vms | join(',') }}"
+  changed_when: true
+
+- name: Grant the ACLs
+  ansible.builtin.command:
+    argv: [pveum, acl, modify, "{{ item.path }}", --groups, "{{ item.group }}", --roles, "{{ item.role }}", --propagate, "1"]
+  loop: "{{ pve_access_todo.acls }}"
+  loop_control:
+    label: "{{ item.path }} {{ item.group }} {{ item.role }}"
+  changed_when: true
