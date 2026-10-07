@@ -1,0 +1,19 @@
+---
+# The backup disk is plugged into one node: the storage and the job are
+# declared from there. Every other node stops here.
+- name: Run only on the node that carries the backup disk
+  ansible.builtin.meta: end_host
+  when: inventory_hostname != pve_backup_node
+  # Untagged tasks are skipped under --tags: without 'always', the other
+  # nodes would not stop here when only a part is applied.
+  tags: [always]
+
+# Each part is tagged, so it can be applied on its own, e.g.
+#   ansible-playbook playbooks/60-pve-backup.yml --tags storage
+- name: Backup storage on the external disk
+  ansible.builtin.import_tasks: storage.yml
+  tags: [storage]
+
+- name: Daily backup job
+  ansible.builtin.import_tasks: job.yml
+  tags: [job]

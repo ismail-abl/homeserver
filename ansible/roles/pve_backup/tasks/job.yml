@@ -1,0 +1,63 @@
+---
+# One job for every guest of the node, every day. Snapshot mode: no guest
+# is stopped. Bind mounts are not archived (no backup=1), so the media on the
+# external disk are not copied onto that same disk.
+
+- name: Read the backup storage
+  ansible.builtin.command:
+    argv: [pvesh, get, "/storage/{{ pve_backup_storage }}", --output-format, json]
+  register: pve_backup_job_storage
+  changed_when: false
+  check_mode: false
+  failed_when: false
+
+- name: Refuse unless the backup storage exists
+  ansible.builtin.assert:
+    that: pve_backup_job_storage.rc == 0
+    fail_msg: >-
+      Storage {{ pve_backup_storage }} does not exist on {{ inventory_hostname }}:
+      the job would fail at every run. Nothing was changed. Run the storage
+      tasks first.
+    quiet: true
+
+- name: Read the backup job
+  ansible.builtin.import_tasks: job_state.yml
+
+- name: Report what a real run would change on the backup job
+  ansible.builtin.debug:
+    msg: >-
+      {{ 'create ' ~ pve_backup_job_id if pve_backup_job_have | length == 0
+         else 'set ' ~ (pve_backup_job_drift | join(', ')) }}
+  changed_when: true
+  when:
+    - ansible_check_mode
+    - pve_backup_job_have | length == 0 or pve_backup_job_drift | length > 0
+
+- name: Create the backup job
+  ansible.builtin.command:
+    argv: "{{ ['pvesh', 'create', '/cluster/backup', '--id', pve_backup_job_id] + pve_backup_job_args }}"
+  when: pve_backup_job_have | length == 0
+  changed_when: true
+
+- name: Bring the backup job to the declaration
+  # Every declared field is sent again; fields set by hand that the role does
+  # not declare stay as they are.
+  ansible.builtin.command:
+    argv: "{{ ['pvesh', 'set', '/cluster/backup/' ~ pve_backup_job_id] + pve_backup_job_args }}"
+  when:
+    - pve_backup_job_have | length > 0
+    - pve_backup_job_drift | length > 0
+  changed_when: true
+
+- name: Read the backup job again
+  ansible.builtin.import_tasks: job_state.yml
+  when: not ansible_check_mode
+
+- name: Assert the backup job matches the declaration
+  ansible.builtin.assert:
+    that:
+      - pve_backup_job_have | length > 0
+      - pve_backup_job_drift | length == 0
+    fail_msg: "Backup job {{ pve_backup_job_id }} still differs on: {{ pve_backup_job_drift | join(', ') }}"
+    quiet: true
+  when: not ansible_check_mode

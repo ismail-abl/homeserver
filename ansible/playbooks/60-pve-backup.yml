@@ -1,0 +1,8 @@
+---
+- name: Proxmox Backup
+  hosts: pve
+  become: true
+  # The storage is restricted to this node by its hostname (a fact).
+  gather_facts: true
+  roles:
+    - pve_backup

@@ -64,3 +64,8 @@ pve_access_acls:
   - { path: /sdn/zones, group: operators, role: VMOperator }
   - { path: /nodes, group: operators, role: VMOperator }
   - { path: /pool, group: operators, role: VMOperator }
+
+# --- Backups (pve_backup) ---
+# The node the external disk is plugged into: the backup storage and the
+# daily job live there.
+pve_backup_node: node1

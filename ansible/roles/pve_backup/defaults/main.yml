@@ -1,0 +1,39 @@
+---
+# defaults file for pve_backup
+
+# Inventory name of the node that carries the backup disk. The role runs
+# there only; guests on other nodes are not backed up by it.
+pve_backup_node: "{{ groups['pve'][0] }}"
+
+# The disk's mount point (mounted by hand or by fstab, never by this role)
+# and the directory the archives go to.
+pve_backup_mountpoint: /mnt/sata-usb
+pve_backup_dir: "{{ pve_backup_mountpoint }}/vzdump"
+
+# Proxmox storage ID of that directory.
+pve_backup_storage: usb-backup
+
+# The daily job: every guest of the node, without stopping any.
+pve_backup_job_id: daily-all
+pve_backup_job_comment: Every guest, every day (pve_backup)
+pve_backup_schedule: "06:00"
+pve_backup_mode: snapshot
+pve_backup_compress: zstd
+
+# The container's mapped root (UID 100000) cannot traverse a temporary
+# directory under the root-only target, so vzdump stages here instead (root
+# filesystem). In snapshot mode it stages little; a container whose volume
+# cannot be snapshotted falls back to suspend mode and copies its whole
+# rootfs here.
+pve_backup_tmpdir: /var/tmp
+
+# How many archives Proxmox keeps per guest.
+pve_backup_retention:
+  keep-daily: 1
+  keep-weekly: 1
+  keep-monthly: 1
+
+# While a running VM is backed up, its writes first copy the old block to
+# the target; with a slow USB disk that stalls the VM. Fleecing copies them
+# to a temporary image on this (fast) storage instead.
+pve_backup_fleecing_storage: pve-data

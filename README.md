@@ -14,6 +14,7 @@ entirely, with every change versioned, reviewable and checkable:
 - [x] Storage: a ZFS pool for guest disks on every node, declared as one Proxmox storage
 - [x] Swap in compressed RAM (zram)
 - [x] Access: groups, a custom guest-operator role, users without stored passwords, pools, ACLs
+- [x] Backups: every guest every day to the external disk, with retention (no guest stopped)
 - [ ] Container configs through `pct`: reverse proxy + fail2ban, SFTPGo
 - [x] Secrets with `ansible-vault`
 - [ ] Network: bridges, SDN, firewall
@@ -55,8 +56,8 @@ run the baseline with `--limit <node> --ask-pass`: it authorizes
 `ssh_admin_keys` before turning password logins off, and refuses to turn them
 off if no admin key is in place.
 
-**Every run.** Playbooks in order, `10`, `20`, `30` then `40`, each previewed then
-applied:
+**Every run.** Playbooks in order, `10`, `20`, `30`, `40`, then `60` (`50`,
+replication, comes later), each previewed then applied:
 
 ```bash
 ansible-playbook playbooks/10-host-baseline.yml --check --diff   # preview, changes nothing
@@ -67,6 +68,8 @@ ansible-playbook playbooks/30-pve-storage.yml --check --diff
 ansible-playbook playbooks/30-pve-storage.yml
 ansible-playbook playbooks/40-pve-access.yml --check --diff
 ansible-playbook playbooks/40-pve-access.yml
+ansible-playbook playbooks/60-pve-backup.yml --check --diff
+ansible-playbook playbooks/60-pve-backup.yml
 ```
 
 A converged setup previews `changed=0`; anything else is drift.
@@ -173,3 +176,22 @@ run it node by node (`--limit`).
   shared by every node: the role reads it from one node, works out the
   differences, applies one `pveum` command per difference, reads again and
   asserts nothing is left. `--check` prints the differences it would apply.
+
+### `pve_backup`
+
+- **Every guest, every day, without stopping any.** One vzdump job,
+  snapshot mode, `zstd`, at 06:00, keeps the last day, a week-old and a
+  month-old archive. Running
+  VMs use fleecing on the fast pool, so a slow backup disk does not stall
+  them. Bind mounts are not archived: media on the external disk stay out.
+- **On the external disk of one node** (`pve_backup_node`), in a directory
+  readable by root only (containers that bind-mount the disk share its
+  group). The role refuses to run when the disk is not mounted, and the
+  storage is declared with `is_mountpoint`, so Proxmox takes it offline
+  instead of filling the root filesystem if the disk is ever missing.
+- **Limit:** the archives live on the same machine as the guests: they
+  protect from mistakes and corruption, not from losing that node. Failures
+  only show in the Proxmox task log until notifications are set up.
+- **Declares and corrects, never deletes**: the storage entry and the job
+  are read, compared with the declaration, created or corrected, then read
+  again and asserted. `--check` prints what would change.

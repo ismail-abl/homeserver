@@ -1,0 +1,128 @@
+---
+# A 'dir' storage for vzdump archives on the node's external disk. Two
+# guards keep archives off the root filesystem when the disk is absent: the
+# role refuses to run, and Proxmox itself (is_mountpoint) takes the storage
+# offline at every run while nothing is mounted there.
+
+- name: Read what is mounted on the backup disk's mount point
+  ansible.builtin.command:
+    argv: [findmnt, --noheadings, --output, SOURCE, --mountpoint, "{{ pve_backup_mountpoint }}"]
+  register: pve_backup_mount
+  changed_when: false
+  check_mode: false
+  failed_when: false
+
+- name: Refuse unless the backup disk is mounted
+  ansible.builtin.assert:
+    that: pve_backup_mount.rc == 0
+    fail_msg: >-
+      Nothing is mounted on {{ pve_backup_mountpoint }} on {{ inventory_hostname }}:
+      archives would land on the root filesystem. Nothing was changed. Mount the
+      disk (this role never mounts it) and run again.
+    quiet: true
+
+- name: Read the storage entry
+  ansible.builtin.import_tasks: storage_state.yml
+
+- name: Refuse to take over a storage that is not this directory
+  # A storage's type and path cannot be changed; another storage of this name
+  # is left alone.
+  ansible.builtin.assert:
+    that:
+      - pve_backup_storage_have.type == 'dir'
+      - pve_backup_storage_have.path == pve_backup_dir
+    fail_msg: >-
+      Storage {{ pve_backup_storage }} exists as {{ pve_backup_storage_have.type }}
+      on {{ pve_backup_storage_have.path | default('no path') }}, not as the directory
+      {{ pve_backup_dir }}. Nothing was changed; fix it by hand or choose another
+      pve_backup_storage.
+    quiet: true
+  when: pve_backup_storage_have | length > 0
+
+- name: Create the archive directory, for root only
+  # The mount point is setgid with a group the containers that bind-mount the
+  # disk belong to; a new directory would inherit that group. Archives hold
+  # the guests' secrets. Ansible sets the mode exactly (chmod), which also
+  # clears the inherited setgid bit.
+  ansible.builtin.file:
+    path: "{{ pve_backup_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0700"
+
+- name: Report what a real run would change on the storage
+  ansible.builtin.debug:
+    msg: >-
+      {{ 'create ' ~ pve_backup_storage if pve_backup_storage_have | length == 0
+         else 'set ' ~ (pve_backup_storage_drift | join(', ')) }}
+  changed_when: true
+  when:
+    - ansible_check_mode
+    - pve_backup_storage_have | length == 0 or pve_backup_storage_drift | length > 0
+
+- name: Declare the storage
+  # The directory exists already (above, with its mode): Proxmox only adds
+  # its 'dump' subdirectory.
+  ansible.builtin.command:
+    argv:
+      - pvesm
+      - add
+      - dir
+      - "{{ pve_backup_storage }}"
+      - --path
+      - "{{ pve_backup_dir }}"
+      - --content
+      - backup
+      - --nodes
+      - "{{ ansible_facts['hostname'] }}"
+      - --is_mountpoint
+      - "{{ pve_backup_mountpoint }}"
+      - --create-base-path
+      - "0"
+  when: pve_backup_storage_have | length == 0
+  changed_when: true
+
+- name: Bring the storage entry to the declaration
+  ansible.builtin.command:
+    argv:
+      - pvesm
+      - set
+      - "{{ pve_backup_storage }}"
+      - --content
+      - backup
+      - --nodes
+      - "{{ ansible_facts['hostname'] }}"
+      - --is_mountpoint
+      - "{{ pve_backup_mountpoint }}"
+      - --create-base-path
+      - "0"
+  when:
+    - pve_backup_storage_have | length > 0
+    - pve_backup_storage_drift | length > 0
+  changed_when: true
+
+- name: Read the storage entry again
+  ansible.builtin.import_tasks: storage_state.yml
+  when: not ansible_check_mode
+
+- name: Assert the storage entry matches the declaration
+  ansible.builtin.assert:
+    that: pve_backup_storage_drift | length == 0
+    fail_msg: "Storage {{ pve_backup_storage }} still differs on: {{ pve_backup_storage_drift | join(', ') }}"
+    quiet: true
+  when: not ansible_check_mode
+
+- name: Read the storage's status
+  ansible.builtin.command:
+    argv: [pvesm, status, --storage, "{{ pve_backup_storage }}"]
+  register: pve_backup_storage_status
+  changed_when: false
+  when: not ansible_check_mode
+
+- name: Assert the storage is online
+  ansible.builtin.assert:
+    that: pve_backup_storage_status.stdout is search('(?m)^' ~ (pve_backup_storage | regex_escape) ~ '\s+dir\s+active')
+    fail_msg: "Storage {{ pve_backup_storage }} is not active: {{ pve_backup_storage_status.stdout }}"
+    quiet: true
+  when: not ansible_check_mode
