@@ -1,0 +1,8 @@
+---
+- name: Proxmox Replication
+  hosts: pve
+  become: true
+  # The target's hostname comes from its facts.
+  gather_facts: true
+  roles:
+    - pve_replication

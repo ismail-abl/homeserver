@@ -1,0 +1,25 @@
+---
+# Refuse anything that cannot be applied whole, before any write. (The quorum
+# and target-node check is in state.yml: it must come before the per-guest reads.)
+
+- name: Refuse a guest with a disk Proxmox cannot replicate
+  ansible.builtin.assert:
+    that: pve_replication_offenders | length == 0
+    fail_msg: >-
+      These disks cannot be replicated to {{ pve_replication_target_node }}:
+      {{ pve_replication_offenders | join('; ') }}. Nothing was changed. Move the
+      disk to a ZFS storage present on both nodes, or mark a bind mount
+      replicate=0 (applied at the guest's next restart); this role never edits
+      a guest.
+    quiet: true
+
+- name: Refuse a job that points at another node
+  # A job's target cannot be changed in Proxmox; a new target means a new job
+  # and a new full copy.
+  ansible.builtin.assert:
+    that: pve_replication_todo.conflict | length == 0
+    fail_msg: >-
+      These jobs replicate to another node: {{ pve_replication_todo.conflict | join(', ') }}.
+      Nothing was changed. Remove them by hand (pvesr delete <id>) if the target
+      should change.
+    quiet: true

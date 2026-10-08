@@ -1,0 +1,21 @@
+---
+# One pvesr call per job to create or correct. The jobs are cluster-wide;
+# Proxmox's scheduler runs them on the guest's node, the first one at the
+# next tick of the schedule (a full copy), the next ones incrementally.
+
+- name: Create the replication jobs
+  ansible.builtin.command:
+    argv: >-
+      {{ ['pvesr', 'create-local-job', item, pve_replication_target_node,
+          '--schedule', pve_replication_schedule]
+         + (['--rate', pve_replication_rate | string] if pve_replication_rate else []) }}
+  loop: "{{ pve_replication_todo.create }}"
+  changed_when: true
+
+- name: Bring the replication jobs to the declaration
+  ansible.builtin.command:
+    argv: >-
+      {{ ['pvesr', 'update', item, '--schedule', pve_replication_schedule]
+         + (['--rate', pve_replication_rate | string] if pve_replication_rate else ['--delete', 'rate']) }}
+  loop: "{{ pve_replication_todo['update'] }}"
+  changed_when: true

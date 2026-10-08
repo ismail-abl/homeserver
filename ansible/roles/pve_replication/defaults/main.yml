@@ -1,0 +1,16 @@
+---
+# defaults file for pve_replication
+
+# Inventory name of the node that receives the copies. Every guest running
+# on another node is replicated to it; guests already on it are skipped.
+pve_replication_target: "{{ groups['pve'] | last }}"
+
+# Proxmox calendar event: when each job runs.
+pve_replication_schedule: "*/15"
+
+# Bandwidth cap per job, in MB/s; null removes it. The first sync copies
+# every disk in full; later ones send only the blocks changed since.
+pve_replication_rate: 50
+
+# Jobs are named <vmid>-<jobnum>; the role manages this number only.
+pve_replication_jobnum: 0

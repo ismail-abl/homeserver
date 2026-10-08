@@ -14,6 +14,7 @@ entirely, with every change versioned, reviewable and checkable:
 - [x] Storage: a ZFS pool for guest disks on every node, declared as one Proxmox storage
 - [x] Swap in compressed RAM (zram)
 - [x] Access: groups, a custom guest-operator role, users without stored passwords, pools, ACLs
+- [x] Replication: every guest copied to the second node every 15 minutes (a warm copy, recovered by hand)
 - [x] Backups: every guest every day to the external disk, with retention (no guest stopped)
 - [ ] Container configs through `pct`: reverse proxy + fail2ban, SFTPGo
 - [x] Secrets with `ansible-vault`
@@ -56,8 +57,8 @@ run the baseline with `--limit <node> --ask-pass`: it authorizes
 `ssh_admin_keys` before turning password logins off, and refuses to turn them
 off if no admin key is in place.
 
-**Every run.** Playbooks in order, `10`, `20`, `30`, `40`, then `60` (`50`,
-replication, comes later), each previewed then applied:
+**Every run.** Playbooks in order, `10`, `20`, `30`, `40`, `50`, then `60`,
+each previewed then applied:
 
 ```bash
 ansible-playbook playbooks/10-host-baseline.yml --check --diff   # preview, changes nothing
@@ -68,6 +69,8 @@ ansible-playbook playbooks/30-pve-storage.yml --check --diff
 ansible-playbook playbooks/30-pve-storage.yml
 ansible-playbook playbooks/40-pve-access.yml --check --diff
 ansible-playbook playbooks/40-pve-access.yml
+ansible-playbook playbooks/50-pve-replication.yml --check --diff
+ansible-playbook playbooks/50-pve-replication.yml
 ansible-playbook playbooks/60-pve-backup.yml --check --diff
 ansible-playbook playbooks/60-pve-backup.yml
 ```
@@ -176,6 +179,21 @@ run it node by node (`--limit`).
   shared by every node: the role reads it from one node, works out the
   differences, applies one `pveum` command per difference, reads again and
   asserts nothing is left. `--check` prints the differences it would apply.
+
+### `pve_replication`
+
+- **Every guest not on the second node is copied to it every 15 minutes**
+  with Proxmox storage replication (ZFS snapshots sent incrementally; the
+  first copy is full, capped at 50 MB/s). No guest is stopped.
+- **Refuses before writing anything** if a guest has a disk Proxmox cannot
+  replicate (not on a ZFS storage present on both nodes, or a bind mount not
+  marked `replicate=0`), or if a job already points at another node. It never
+  edits a guest.
+- **A warm copy, not a failover.** With the votes at 3 + 1 the second node
+  alone is never quorate, so guests are brought up there by hand, from a copy
+  at most 15 minutes old. Media on the external disk are not copied.
+- **Declares and corrects, never deletes**: jobs are read, compared,
+  created or corrected (schedule, rate), read again and asserted.
 
 ### `pve_backup`
 

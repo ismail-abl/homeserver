@@ -1,0 +1,47 @@
+---
+- name: Check that the target node is part of this run
+  # Its hostname, the name Proxmox knows it by, comes from its facts.
+  ansible.builtin.assert:
+    that: pve_replication_target in ansible_play_hosts_all
+    fail_msg: >-
+      pve_replication_target ({{ pve_replication_target }}) is not in this run:
+      drop --limit, or include it.
+    quiet: true
+  run_once: true
+
+# Replication jobs live in /etc/pve, which every node shares: the role runs
+# once, from the first node of the play.
+- name: Declare the replication jobs once for the cluster
+  run_once: true
+  block:
+    - name: Read the current state
+      ansible.builtin.import_tasks: state.yml
+
+    - name: Check the guests and the jobs
+      ansible.builtin.import_tasks: guards.yml
+
+    - name: Report what a real run would change
+      ansible.builtin.debug:
+        msg: "{{ pve_replication_todo | dict2items | rejectattr('value', 'eq', []) | items2dict }}"
+      changed_when: true
+      when:
+        - ansible_check_mode
+        - pve_replication_todo.create | length > 0 or pve_replication_todo['update'] | length > 0
+
+    - name: Apply the differences
+      ansible.builtin.import_tasks: apply.yml
+
+    - name: Read the state again
+      ansible.builtin.import_tasks: state.yml
+      when: not ansible_check_mode
+
+    - name: Assert nothing is left to change
+      ansible.builtin.assert:
+        that:
+          - pve_replication_todo.create | length == 0
+          - pve_replication_todo['update'] | length == 0
+        fail_msg: >-
+          Still different after the run:
+          {{ pve_replication_todo | dict2items | rejectattr('value', 'eq', []) | items2dict }}
+        quiet: true
+      when: not ansible_check_mode

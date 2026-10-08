@@ -1,0 +1,106 @@
+---
+# What Proxmox has, and what a run must change. Read-only: runs in check
+# mode too, and read again after the changes to prove them (tasks/main.yml).
+
+- name: Read the cluster, guests, storages and replication jobs
+  ansible.builtin.command:
+    argv: "{{ ['pvesh', 'get'] + item.args + ['--output-format', 'json'] }}"
+  loop:
+    - { name: status, args: [/cluster/status] }
+    - { name: guests, args: [/cluster/resources, --type, vm] }
+    - { name: storages, args: [/storage] }
+    - { name: jobs, args: [/cluster/replication] }
+  loop_control:
+    label: "{{ item.name }}"
+  register: pve_replication_read
+  changed_when: false
+  check_mode: false
+
+- name: Index what Proxmox has
+  ansible.builtin.set_fact:
+    pve_replication_have: >-
+      {{ dict(pve_replication_read.results | map(attribute='item.name')
+              | zip(pve_replication_read.results | map(attribute='stdout') | map('from_json'))) }}
+    # Proxmox knows nodes by hostname, the inventory by its own names.
+    pve_replication_target_node: "{{ hostvars[pve_replication_target]['ansible_facts']['hostname'] }}"
+
+- name: Refuse unless the cluster is quorate and the target node online
+  # Before the per-guest reads: a down node would only give a raw pvesh error.
+  ansible.builtin.assert:
+    that:
+      - pve_replication_have.status | selectattr('type', 'eq', 'cluster')
+        | map(attribute='quorate') | first | default(0) | int == 1
+      - pve_replication_have.status | selectattr('type', 'eq', 'node')
+        | selectattr('name', 'eq', pve_replication_target_node)
+        | map(attribute='online') | first | default(0) | int == 1
+    fail_msg: >-
+      The cluster is not quorate, or the target node {{ pve_replication_target_node }}
+      is not an online member of it. Nothing was changed.
+    quiet: true
+
+- name: Pick the guests to replicate
+  # Every guest that does not already run on the target node.
+  ansible.builtin.set_fact:
+    pve_replication_sources: >-
+      {{ pve_replication_have.guests | rejectattr('node', 'eq', pve_replication_target_node)
+         | sort(attribute='vmid') }}
+
+- name: Read the configuration of each guest to replicate
+  ansible.builtin.command:
+    argv: [pvesh, get, "/nodes/{{ item.node }}/{{ item.type }}/{{ item.vmid }}/config", --output-format, json]
+  loop: "{{ pve_replication_sources }}"
+  loop_control:
+    label: "{{ item.vmid }}"
+  register: pve_replication_configs
+  changed_when: false
+  check_mode: false
+
+- name: Find the disks Proxmox cannot replicate
+  # Proxmox replicates a guest only if every disk is on a ZFS storage present
+  # on both nodes. It skips CD-ROMs, shared storages and volumes marked
+  # replicate=0, and refuses everything else, bind mounts included.
+  ansible.builtin.set_fact:
+    pve_replication_offenders: >-
+      {%- set ns = namespace(out=[]) -%}
+      {%- for result in pve_replication_configs.results -%}
+      {%- for key, value in (result.stdout | from_json).items()
+            if key is match('^(rootfs|mp|unused|scsi|virtio|sata|ide|efidisk|tpmstate)[0-9]*$') -%}
+      {%- set parts = (value | string).split(',') -%}
+      {%- set volume = parts[0] | regex_replace('^file=', '') -%}
+      {%- set storage = volume.split(':')[0] if ':' in volume else '' -%}
+      {%- set entry = pve_replication_have.storages | selectattr('storage', 'eq', storage) | first | default({}) -%}
+      {%- set nodes = (entry.nodes | default('', true)).split(',') | reject('eq', '') | list -%}
+      {%- set replicable = (entry.type | default('')) == 'zfspool'
+            and (nodes | length == 0
+                 or (result.item.node in nodes and pve_replication_target_node in nodes)) -%}
+      {%- if 'media=cdrom' not in parts and volume != 'none' and 'replicate=0' not in parts
+            and (entry.shared | default(0, true) | int) == 0 and not replicable -%}
+      {%- set ns.out = ns.out + [result.item.vmid ~ ' ' ~ key ~ ': ' ~ volume] -%}
+      {%- endif -%}
+      {%- endfor -%}
+      {%- endfor -%}
+      {{ ns.out }}
+
+- name: Work out what a run must change
+  # A job's schedule may be left out when it is Proxmox's default (*/15), its
+  # rate when it has none.
+  ansible.builtin.set_fact:
+    pve_replication_todo: >-
+      {%- set ns = namespace(create=[], update=[], conflict=[]) -%}
+      {%- set have_ids = pve_replication_have.jobs | map(attribute='id') | list -%}
+      {%- set wanted = namespace(ids=[]) -%}
+      {%- for guest in pve_replication_sources -%}
+      {%- set wanted.ids = wanted.ids + [guest.vmid ~ '-' ~ pve_replication_jobnum] -%}
+      {%- endfor -%}
+      {%- for id in wanted.ids if id not in have_ids -%}
+      {%- set ns.create = ns.create + [id] -%}
+      {%- endfor -%}
+      {%- for job in pve_replication_have.jobs if job.id in wanted.ids -%}
+      {%- if job.target != pve_replication_target_node -%}
+      {%- set ns.conflict = ns.conflict + [job.id ~ ' -> ' ~ job.target] -%}
+      {%- elif (job.schedule | default('*/15')) != pve_replication_schedule
+            or (job.rate | default(0) | float) != (pve_replication_rate | default(0, true) | float) -%}
+      {%- set ns.update = ns.update + [job.id] -%}
+      {%- endif -%}
+      {%- endfor -%}
+      {{ {'create': ns.create, 'update': ns.update, 'conflict': ns.conflict} }}

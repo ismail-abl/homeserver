@@ -69,3 +69,8 @@ pve_access_acls:
 # The node the external disk is plugged into: the backup storage and the
 # daily job live there.
 pve_backup_node: node1
+
+# --- Replication (pve_replication) ---
+# Every guest not already on this node gets a copy here, refreshed every
+# 15 minutes. A warm copy, brought up by hand, not a failover.
+pve_replication_target: node2
