@@ -1,0 +1,87 @@
+---
+# Runs only when the file must change, once, on the first node of the play
+# (run_once is set on the block, not on the include, so the scope is explicit).
+# A first activation writes the file disabled and checks it; then every change
+# is written under a rollback timer, which tasks/confirm.yml cancels once every
+# node has been reached again. pmxcfs refuses ansible.builtin.copy: dd writes
+# in place.
+
+- name: Write the file once, under a rollback timer
+  run_once: true
+  block:
+    - name: Write the file disabled first and check it
+      when:
+        - pve_firewall_enable | bool
+        - (pve_firewall_have.options.enable | default(0) | int) != 1
+      block:
+        - name: Write the datacenter firewall file, disabled
+          ansible.builtin.command:
+            argv: [dd, of=/etc/pve/firewall/cluster.fw, bs=64K, iflag=fullblock, status=none]
+            stdin: "{{ lookup('ansible.builtin.template', 'cluster.fw.j2', keep_trailing_newline=true) }}"
+            stdin_add_newline: false
+          vars:
+            pve_firewall_render_enable: false
+          changed_when: true
+
+        - name: Check the disabled file
+          ansible.builtin.include_tasks: verify.yml
+          vars:
+            pve_firewall_render_enable: false
+
+    - name: Keep the current file for the rollback
+      ansible.builtin.command:
+        argv: [cp, /etc/pve/firewall/cluster.fw, /root/pve-firewall-rollback.fw]
+      environment:
+        LC_ALL: C
+      changed_when: true
+      register: pve_firewall_kept
+      failed_when: pve_firewall_kept.rc != 0 and 'No such file' not in pve_firewall_kept.stderr
+
+    - name: Arm the rollback timer
+      # Restores the kept file, or removes the new one if there was none.
+      ansible.builtin.command:
+        argv:
+          - systemd-run
+          - --unit=pve-firewall-rollback
+          - --collect
+          - --property=Type=oneshot
+          - --on-active={{ pve_firewall_rollback_delay }}
+          - /bin/sh
+          - -c
+          - >-
+            {{ 'cp /root/pve-firewall-rollback.fw /etc/pve/firewall/cluster.fw && rm -f /root/pve-firewall-rollback.fw'
+               if pve_firewall_kept.rc == 0 else 'rm -f /etc/pve/firewall/cluster.fw' }}
+      changed_when: true
+
+    - name: Write the datacenter firewall file
+      block:
+        - name: Write the declared file
+          ansible.builtin.command:
+            argv: [dd, of=/etc/pve/firewall/cluster.fw, bs=64K, iflag=fullblock, status=none]
+            stdin: "{{ pve_firewall_wanted }}"
+            stdin_add_newline: false
+          changed_when: true
+
+        - name: Check the declared file
+          ansible.builtin.include_tasks: verify.yml
+
+      rescue:
+        - name: Roll back at once
+          # A oneshot service: systemctl start returns once the restore is done.
+          ansible.builtin.command:
+            argv: [systemctl, start, pve-firewall-rollback.service]
+          changed_when: true
+
+        - name: Stop the rollback timer, it has done its work
+          # Otherwise it would fire a second time and undo a later good file.
+          ansible.builtin.command:
+            argv: [systemctl, stop, pve-firewall-rollback.timer]
+          register: pve_firewall_timer_stop
+          changed_when: true
+          failed_when: pve_firewall_timer_stop.rc != 0 and 'not loaded' not in pve_firewall_timer_stop.stderr
+
+        - name: Stop after the rollback
+          ansible.builtin.fail:
+            msg: >-
+              Proxmox did not read the new file as declared; the previous file was
+              restored. See the failed check above.

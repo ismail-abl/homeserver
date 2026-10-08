@@ -1,0 +1,36 @@
+---
+# Read the file back through Proxmox's parser (the API) and compare it with
+# the declaration: a line Proxmox could not parse is dropped or flagged there.
+
+- name: Read the firewall back through the API
+  ansible.builtin.command:
+    argv: "{{ ['pvesh', 'get'] + item.args + ['--output-format', 'json'] }}"
+  loop:
+    - { name: options, args: [/cluster/firewall/options] }
+    - { name: rules, args: [/cluster/firewall/rules] }
+    - { name: management, args: [/cluster/firewall/ipset/management] }
+  loop_control:
+    label: "{{ item.name }}"
+  register: pve_firewall_verify_read
+  changed_when: false
+  check_mode: false
+
+- name: Assert Proxmox understood the file as declared
+  vars:
+    pve_firewall_seen: >-
+      {{ dict(pve_firewall_verify_read.results | map(attribute='item.name')
+              | zip(pve_firewall_verify_read.results | map(attribute='stdout') | map('from_json'))) }}
+  ansible.builtin.assert:
+    that:
+      - (pve_firewall_seen.options.enable | default(0) | int)
+        == ((pve_firewall_render_enable | default(pve_firewall_enable)) | bool | int)
+      - pve_firewall_seen.options.policy_in | default('') == pve_firewall_policy_in
+      - pve_firewall_seen.options.policy_out | default('') == pve_firewall_policy_out
+      - pve_firewall_seen.rules | length == pve_firewall_rules | length
+      - pve_firewall_seen.rules | selectattr('errors', 'defined') | list | length == 0
+      - pve_firewall_seen.management | map(attribute='cidr') | sort
+        == pve_firewall_management | sort
+      - pve_firewall_seen.management | selectattr('errors', 'defined') | list | length == 0
+    fail_msg: >-
+      Proxmox read the file differently from the declaration: {{ pve_firewall_seen }}
+    quiet: true

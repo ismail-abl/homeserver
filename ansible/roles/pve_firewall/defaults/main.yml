@@ -1,0 +1,27 @@
+---
+# defaults file for pve_firewall
+
+# Turn the nodes' firewall on (cluster.fw "enable"). Guests are not filtered
+# by it: each guest's own firewall stays off until its own file enables it.
+pve_firewall_enable: true
+
+# Incoming traffic to the nodes is dropped unless a rule accepts it;
+# outgoing traffic is allowed.
+pve_firewall_policy_in: DROP
+pve_firewall_policy_out: ACCEPT
+
+# Networks (CIDRs) allowed to reach the web UI and API (port 8006, which also
+# carries the consoles), to ping the nodes and, unless SSH is open to anywhere,
+# to use SSH. Must contain the address Ansible connects from. Proxmox itself
+# also opens the console, SPICE and migration ports to its own "management"
+# set plus the nodes' local network; the role relies on that for migration only.
+pve_firewall_management: []
+
+# SSH to the nodes from any address (logins are key-only: host_baseline), or
+# from pve_firewall_management only.
+pve_firewall_ssh_from_anywhere: false
+
+# Seconds after which a change is undone unless the controller has reached
+# every node again through a new connection. At least 150: the confirmation can
+# take about 135 s in the worst case (60 s status wait, 60 s connection, 15 s uri).
+pve_firewall_rollback_delay: 180

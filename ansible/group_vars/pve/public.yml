@@ -74,3 +74,9 @@ pve_backup_node: node1
 # Every guest not already on this node gets a copy here, refreshed every
 # 15 minutes. A warm copy, brought up by hand, not a failover.
 pve_replication_target: node2
+
+# --- Firewall (pve_firewall) ---
+# Web UI and API, and ping, from the home LAN only (both address families, from
+# the vault). SSH from anywhere: logins are key-only.
+pve_firewall_management: "{{ lan_cidrs }}"
+pve_firewall_ssh_from_anywhere: true

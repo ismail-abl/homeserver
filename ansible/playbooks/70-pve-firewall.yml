@@ -1,0 +1,11 @@
+---
+- name: Proxmox Firewall
+  hosts: pve
+  become: true
+  # The controller's address, as each node sees it, comes from the facts.
+  gather_facts: true
+  # A failure on any node must stop the play before the rollback timer is
+  # cancelled, so the previous file comes back.
+  any_errors_fatal: true
+  roles:
+    - pve_firewall

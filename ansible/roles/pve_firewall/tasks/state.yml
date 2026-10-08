@@ -1,0 +1,72 @@
+---
+# What Proxmox has, and what the file should be. Read-only: runs in check
+# mode too, and again after a change to prove it (tasks/main.yml).
+
+- name: Read the firewall options and the SDN zones and vnets
+  ansible.builtin.command:
+    argv: "{{ ['pvesh', 'get'] + item.args + ['--output-format', 'json'] }}"
+  loop:
+    - { name: options, args: [/cluster/firewall/options] }
+    - { name: zones, args: [/cluster/sdn/zones] }
+    - { name: vnets, args: [/cluster/sdn/vnets] }
+  loop_control:
+    label: "{{ item.name }}"
+  register: pve_firewall_read
+  changed_when: false
+  check_mode: false
+
+- name: Read this node's own firewall options
+  ansible.builtin.command:
+    argv: [pvesh, get, "/nodes/{{ ansible_facts['hostname'] }}/firewall/options", --output-format, json]
+  register: pve_firewall_host_read
+  changed_when: false
+  check_mode: false
+
+- name: Read the datacenter firewall file
+  ansible.builtin.slurp:
+    src: /etc/pve/firewall/cluster.fw
+  register: pve_firewall_file
+  failed_when: pve_firewall_file is failed and 'not found' not in (pve_firewall_file.msg | default(''))
+
+- name: Index what Proxmox has
+  ansible.builtin.set_fact:
+    pve_firewall_have: >-
+      {{ dict(pve_firewall_read.results | map(attribute='item.name')
+              | zip(pve_firewall_read.results | map(attribute='stdout') | map('from_json'))) }}
+    pve_firewall_host_disabled: >-
+      {{ ((pve_firewall_host_read.stdout | from_json).enable | default(1) | int) == 0 }}
+    pve_firewall_current: >-
+      {{ (pve_firewall_file.content | b64decode) if pve_firewall_file.content is defined else '' }}
+
+- name: Find the networks where the nodes serve DHCP and DNS
+  # Proxmox has no implicit rule for its SDN dnsmasq: without these, guests
+  # would lose their address at lease renewal.
+  ansible.builtin.set_fact:
+    pve_firewall_dnsmasq_vnets: >-
+      {{ pve_firewall_have.vnets
+         | selectattr('zone', 'in', pve_firewall_have.zones
+                      | selectattr('dhcp', 'defined') | selectattr('dhcp', 'eq', 'dnsmasq')
+                      | map(attribute='zone') | list)
+         | map(attribute='vnet') | sort }}
+
+- name: Build the rules for the nodes
+  ansible.builtin.set_fact:
+    pve_firewall_rules: >-
+      {%- set ns = namespace(out=[
+            'IN ACCEPT -source +dc/management -p tcp -dport 8006 # Web UI and API',
+            'IN SSH(ACCEPT)' ~ ('' if pve_firewall_ssh_from_anywhere | bool else ' -source +dc/management') ~ ' # SSH',
+            'IN Ping(ACCEPT) -source +dc/management # Ping']) -%}
+      {%- for vnet in pve_firewall_dnsmasq_vnets -%}
+      {%- set ns.out = ns.out + [
+            'IN ACCEPT -i ' ~ vnet ~ ' -p udp -dport 67 # DHCP for the guests on ' ~ vnet,
+            'IN DNS(ACCEPT) -i ' ~ vnet ~ ' # DNS for the guests on ' ~ vnet] -%}
+      {%- endfor -%}
+      {{ ns.out }}
+
+- name: Render the declared file
+  ansible.builtin.set_fact:
+    pve_firewall_wanted: "{{ lookup('ansible.builtin.template', 'cluster.fw.j2', keep_trailing_newline=true) }}"
+
+- name: Note whether the file must change
+  ansible.builtin.set_fact:
+    pve_firewall_drift: "{{ pve_firewall_wanted != pve_firewall_current }}"

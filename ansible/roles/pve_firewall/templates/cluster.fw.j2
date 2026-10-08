@@ -1,0 +1,17 @@
+[OPTIONS]
+
+enable: {{ (pve_firewall_render_enable | default(pve_firewall_enable)) | bool | int }}
+policy_in: {{ pve_firewall_policy_in }}
+policy_out: {{ pve_firewall_policy_out }}
+
+[IPSET management] # Web UI and API, ping{{ '' if pve_firewall_ssh_from_anywhere | bool else ', SSH' }}
+
+{% for cidr in pve_firewall_management | sort %}
+{{ cidr }}
+{% endfor %}
+
+[RULES]
+
+{% for rule in pve_firewall_rules %}
+{{ rule }}
+{% endfor %}

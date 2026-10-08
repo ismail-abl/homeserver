@@ -1,0 +1,77 @@
+---
+# Refuse anything that could lock the operator out, before any write.
+
+- name: Check that every node is part of this run
+  # The datacenter file is cluster-wide: each node must be checked and confirmed.
+  ansible.builtin.assert:
+    that: groups['pve'] | difference(ansible_play_hosts_all) | length == 0
+    fail_msg: >-
+      The datacenter firewall file applies to every node: run on all of them
+      (drop --limit), so each one is checked and confirmed. Nothing was changed.
+    quiet: true
+  run_once: true
+
+- name: Refuse unusable firewall variables
+  ansible.builtin.assert:
+    that:
+      - pve_firewall_policy_in in ['ACCEPT', 'DROP', 'REJECT']
+      - pve_firewall_policy_out in ['ACCEPT', 'DROP', 'REJECT']
+      - pve_firewall_management | length > 0
+      - pve_firewall_rollback_delay | int >= 150
+    fail_msg: >-
+      pve_firewall_policy_in/out must be ACCEPT, DROP or REJECT,
+      pve_firewall_management must list at least one network, and
+      pve_firewall_rollback_delay must be at least 150 seconds (the confirmation can take that long). Nothing was changed.
+    quiet: true
+
+- name: Check whether Ansible connects from a management address
+  # The address this SSH session comes from, as the node sees it. Python's
+  # ipaddress module, on the node: the controller has no netaddr.
+  ansible.builtin.command:
+    argv: >-
+      {{ ['python3', '-c',
+          'import ipaddress, sys; a = ipaddress.ip_address(sys.argv[1]); '
+          ~ 'nets = [ipaddress.ip_network(n, strict=False) for n in sys.argv[2:]]; '
+          ~ 'sys.exit(0 if any(a in n for n in nets) else 2)',
+          ansible_facts['env']['SSH_CLIENT'].split() | first] + pve_firewall_management }}
+  register: pve_firewall_controller_in
+  changed_when: false
+  check_mode: false
+  failed_when: false
+
+- name: Refuse an invalid management network
+  # An invalid entry raises in Python (exit 1); "not inside" exits 2.
+  ansible.builtin.assert:
+    that: pve_firewall_controller_in.rc in [0, 2]
+    fail_msg: >-
+      A pve_firewall_management entry is not a valid network
+      ({{ pve_firewall_controller_in.stderr_lines[-1] | default('') }}).
+      Nothing was changed.
+    quiet: true
+
+- name: Refuse unless Ansible connects from a management address
+  ansible.builtin.assert:
+    that: pve_firewall_controller_in.rc == 0
+    fail_msg: >-
+      Ansible reaches {{ inventory_hostname }} from {{ ansible_facts['env']['SSH_CLIENT'].split() | first }},
+      which is not in pve_firewall_management: the new rules could lock it out.
+      Nothing was changed.
+    quiet: true
+
+- name: Check for a rollback still pending from an earlier run
+  ansible.builtin.command:
+    argv: [systemctl, is-active, pve-firewall-rollback.timer]
+  register: pve_firewall_pending
+  changed_when: false
+  check_mode: false
+  failed_when: false
+
+- name: Refuse while an earlier rollback is pending
+  ansible.builtin.assert:
+    that: pve_firewall_pending.rc != 0
+    fail_msg: >-
+      A rollback of the firewall file is still armed on {{ inventory_hostname }}
+      (pve-firewall-rollback.timer): an earlier run did not finish. Let it fire,
+      or stop it (systemctl stop pve-firewall-rollback.timer) once the current
+      file is known to be good. Nothing was changed.
+    quiet: true

@@ -1,0 +1,56 @@
+---
+# The datacenter firewall file lives in /etc/pve, which every node shares. The
+# reads and guards run on every node (each sees the controller's own address);
+# the write runs once.
+
+- name: Read the current state
+  ansible.builtin.import_tasks: state.yml
+
+- name: Check the variables and the controller's address
+  ansible.builtin.import_tasks: guards.yml
+
+- name: Report nodes that opt out of the firewall
+  # A host.fw with "enable: 0" is the node's own choice; the role leaves it.
+  ansible.builtin.debug:
+    msg: "{{ inventory_hostname }} opts out: its host.fw has enable: 0, its own rules are off."
+  when: pve_firewall_host_disabled
+
+- name: Preview the datacenter firewall file
+  # Check mode only: ansible.builtin.copy cannot write into /etc/pve (pmxcfs),
+  # but in check mode it writes nothing and shows the diff. pmxcfs fixes the
+  # files under /etc/pve/firewall at 0640 (root:www-data), hence the mode.
+  ansible.builtin.copy:
+    content: "{{ pve_firewall_wanted }}"
+    dest: /etc/pve/firewall/cluster.fw
+    mode: "0640"
+  run_once: true
+  when: ansible_check_mode
+
+- name: Apply the file once for the cluster
+  ansible.builtin.include_tasks: apply.yml
+  when:
+    - not ansible_check_mode
+    - pve_firewall_drift
+
+- name: Confirm every node is still reachable
+  ansible.builtin.include_tasks:
+    file: confirm.yml
+    apply:
+      tags: [pve_firewall_confirm]
+  when:
+    - not ansible_check_mode
+    - pve_firewall_drift
+  tags: [pve_firewall_confirm]
+
+- name: Read the state again
+  ansible.builtin.import_tasks: state.yml
+  when: not ansible_check_mode
+  tags: [pve_firewall_confirm]
+
+- name: Assert the file is as declared
+  ansible.builtin.assert:
+    that: not pve_firewall_drift
+    fail_msg: The datacenter firewall file still differs from the declaration.
+    quiet: true
+  when: not ansible_check_mode
+  tags: [pve_firewall_confirm]

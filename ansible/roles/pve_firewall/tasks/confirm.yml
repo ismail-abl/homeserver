@@ -1,0 +1,46 @@
+---
+# Runs on every node after a change. It proves that the operator still gets in:
+# the firewall is applied, a new SSH connection opens and the web UI answers
+# the controller; only then is the rollback cancelled, once. With
+# any_errors_fatal, a failure here stops the play and the timer fires.
+# "pve-firewall status" prints "Status: enabled/running (pending changes)"
+# until the rules are in iptables, hence the exact-line match.
+
+- name: Wait for the firewall service to apply the file
+  ansible.builtin.command:
+    argv: [pve-firewall, status]
+  register: pve_firewall_status
+  until: >-
+    pve_firewall_status.stdout is search('^Status: enabled/running$', multiline=True)
+    if pve_firewall_enable | bool else pve_firewall_status.stdout is search('^Status: disabled/running$', multiline=True)
+  retries: 12
+  delay: 5
+  changed_when: false
+
+- name: Drop the existing SSH connection
+  ansible.builtin.meta: reset_connection
+
+- name: Open a new SSH connection
+  ansible.builtin.wait_for_connection:
+    timeout: 60
+
+- name: Reach the web UI from the controller
+  ansible.builtin.uri:
+    url: "https://{{ ansible_host }}:8006/"
+    validate_certs: false
+    status_code: 200
+    timeout: 15
+  delegate_to: localhost
+  become: false
+
+- name: Cancel the rollback
+  ansible.builtin.command:
+    argv: [systemctl, stop, pve-firewall-rollback.timer]
+  run_once: true
+  changed_when: true
+
+- name: Remove the kept file
+  ansible.builtin.file:
+    path: /root/pve-firewall-rollback.fw
+    state: absent
+  run_once: true

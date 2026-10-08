@@ -18,7 +18,8 @@ entirely, with every change versioned, reviewable and checkable:
 - [x] Backups: every guest every day to the external disk, with retention (no guest stopped)
 - [ ] Container configs through `pct`: reverse proxy + fail2ban, SFTPGo
 - [x] Secrets with `ansible-vault`
-- [ ] Network: bridges, SDN, firewall
+- [x] Firewall for the nodes: management from the LAN only, rollback if the controller is locked out
+- [ ] Network: bridges, SDN, firewall rules per guest
 - [ ] LXC templates and container provisioning
 
 ## Hardware
@@ -57,7 +58,7 @@ run the baseline with `--limit <node> --ask-pass`: it authorizes
 `ssh_admin_keys` before turning password logins off, and refuses to turn them
 off if no admin key is in place.
 
-**Every run.** Playbooks in order, `10`, `20`, `30`, `40`, `50`, then `60`,
+**Every run.** Playbooks in order, `10`, `20`, `30`, `40`, `50`, `60`, then `70`,
 each previewed then applied:
 
 ```bash
@@ -73,6 +74,8 @@ ansible-playbook playbooks/50-pve-replication.yml --check --diff
 ansible-playbook playbooks/50-pve-replication.yml
 ansible-playbook playbooks/60-pve-backup.yml --check --diff
 ansible-playbook playbooks/60-pve-backup.yml
+ansible-playbook playbooks/70-pve-firewall.yml --check --diff
+ansible-playbook playbooks/70-pve-firewall.yml
 ```
 
 A converged setup previews `changed=0`; anything else is drift.
@@ -213,3 +216,19 @@ run it node by node (`--limit`).
 - **Declares and corrects, never deletes**: the storage entry and the job
   are read, compared with the declaration, created or corrected, then read
   again and asserted. `--check` prints what would change.
+
+### `pve_firewall`
+
+- **The nodes drop what they do not expect.** The web UI, consoles,
+  migration and ping are open to the home network only (both address
+  families); SSH to everyone (key-only logins); DHCP and DNS to the guests
+  on the networks the nodes serve. Proxmox itself keeps cluster traffic open.
+- **It cannot lock its operator out.** It refuses to run unless Ansible
+  connects from the management network. A first activation writes the
+  rules disabled and checks them; every change is written under a rollback
+  timer and kept only once a new SSH connection and the web UI answer from
+  every node. Otherwise the previous file comes back after three minutes.
+- **Guests are not filtered yet**: each guest's own firewall stays off;
+  per-guest rules are the next step.
+- **The whole file is declared**: a rule added in the web UI is removed at
+  the next run.
