@@ -25,3 +25,18 @@ pve_firewall_ssh_from_anywhere: false
 # every node again through a new connection. At least 150: the confirmation can
 # take about 135 s in the worst case (60 s status wait, 60 s connection, 15 s uri).
 pve_firewall_rollback_delay: 180
+
+# More IP sets in the datacenter file, by name: lists of CIDRs. Rules refer
+# to them as +dc/<name>. The role also writes one IP set per SDN vnet whose zone
+# runs the nodes' DHCP (named after the vnet, from its subnets) and "management".
+pve_firewall_ipsets: {}
+
+# Security groups in the datacenter file: name, comment, rules (rule lines as
+# in a Proxmox firewall file). Guests use them by name.
+pve_firewall_groups: []
+
+# Guests whose own firewall the role declares: vmid, groups (names from
+# pve_firewall_groups), optional rules (extra lines) and enable (default
+# true). Incoming traffic not accepted is dropped. Other guests' firewall
+# files are left alone.
+pve_firewall_guests: []

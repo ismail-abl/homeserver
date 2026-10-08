@@ -2,13 +2,28 @@
 # Read the file back through Proxmox's parser (the API) and compare it with
 # the declaration: a line Proxmox could not parse is dropped or flagged there.
 
+- name: List the reads that prove the file
+  ansible.builtin.set_fact:
+    pve_firewall_verify_reads: >-
+      {%- set ns = namespace(out=[
+            {'name': 'options', 'args': ['/cluster/firewall/options']},
+            {'name': 'rules', 'args': ['/cluster/firewall/rules']},
+            {'name': 'ipsets', 'args': ['/cluster/firewall/ipset']},
+            {'name': 'groups', 'args': ['/cluster/firewall/groups']}]) -%}
+      {%- for ipset in pve_firewall_all_ipsets -%}
+      {%- set ns.out = ns.out + [{'name': 'ipset ' ~ ipset.name,
+            'args': ['/cluster/firewall/ipset/' ~ ipset.name], 'count': ipset.cidrs | length}] -%}
+      {%- endfor -%}
+      {%- for group in pve_firewall_groups -%}
+      {%- set ns.out = ns.out + [{'name': 'group ' ~ group.name,
+            'args': ['/cluster/firewall/groups/' ~ group.name], 'count': group.rules | default([]) | length}] -%}
+      {%- endfor -%}
+      {{ ns.out }}
+
 - name: Read the firewall back through the API
   ansible.builtin.command:
     argv: "{{ ['pvesh', 'get'] + item.args + ['--output-format', 'json'] }}"
-  loop:
-    - { name: options, args: [/cluster/firewall/options] }
-    - { name: rules, args: [/cluster/firewall/rules] }
-    - { name: management, args: [/cluster/firewall/ipset/management] }
+  loop: "{{ pve_firewall_verify_reads }}"
   loop_control:
     label: "{{ item.name }}"
   register: pve_firewall_verify_read
@@ -28,9 +43,23 @@
       - pve_firewall_seen.options.policy_out | default('') == pve_firewall_policy_out
       - pve_firewall_seen.rules | length == pve_firewall_rules | length
       - pve_firewall_seen.rules | selectattr('errors', 'defined') | list | length == 0
-      - pve_firewall_seen.management | map(attribute='cidr') | sort
-        == pve_firewall_management | sort
-      - pve_firewall_seen.management | selectattr('errors', 'defined') | list | length == 0
+      - pve_firewall_seen.ipsets | map(attribute='name') | sort
+        == pve_firewall_all_ipsets | map(attribute='name') | sort
+      - pve_firewall_seen.groups | map(attribute='group') | sort
+        == pve_firewall_groups | map(attribute='name') | sort
     fail_msg: >-
       Proxmox read the file differently from the declaration: {{ pve_firewall_seen }}
     quiet: true
+
+- name: Assert every IP set and group reads back whole
+  vars:
+    pve_firewall_seen_entries: "{{ item.stdout | from_json }}"
+  ansible.builtin.assert:
+    that:
+      - pve_firewall_seen_entries | length == item.item.count
+      - pve_firewall_seen_entries | selectattr('errors', 'defined') | list | length == 0
+    fail_msg: "{{ item.item.name }} reads back as {{ pve_firewall_seen_entries }}"
+    quiet: true
+  loop: "{{ pve_firewall_verify_read.results | selectattr('item.count', 'defined') | list }}"
+  loop_control:
+    label: "{{ item.item.name }}"

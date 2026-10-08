@@ -1,0 +1,14 @@
+[OPTIONS]
+
+enable: {{ pve_firewall_guest.enable | default(true) | bool | int }}
+policy_in: DROP
+
+[RULES]
+
+{% for group in pve_firewall_guest.groups | default([]) %}
+GROUP {{ group }}
+{% endfor %}
+{% for rule in pve_firewall_guest.rules | default([]) %}
+{{ rule }}
+{% endfor %}
+

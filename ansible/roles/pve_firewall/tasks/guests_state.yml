@@ -1,0 +1,95 @@
+---
+# Each declared guest's own firewall file: what Proxmox has, what it should
+# be. Read-only: runs in check mode too, and again after a change.
+
+- name: Read the guests
+  ansible.builtin.command:
+    argv: [pvesh, get, /cluster/resources, --type, vm, --output-format, json]
+  register: pve_firewall_guest_read
+  changed_when: false
+  check_mode: false
+  run_once: true
+
+- name: Index the guests
+  # By vmid, as integers.
+  vars:
+    pve_firewall_guest_list: "{{ pve_firewall_guest_read.stdout | from_json }}"
+  ansible.builtin.set_fact:
+    pve_firewall_guest_have: >-
+      {{ dict(pve_firewall_guest_list | map(attribute='vmid') | zip(pve_firewall_guest_list)) }}
+  run_once: true
+
+- name: Read each declared guest's configuration
+  # A guest Proxmox does not have is skipped (and counts as not read); the
+  # guards refuse it later.
+  vars:
+    pve_firewall_guest_res: "{{ pve_firewall_guest_have[item.vmid | int] | default({}) }}"
+  ansible.builtin.command:
+    argv:
+      - pvesh
+      - get
+      - "/nodes/{{ pve_firewall_guest_res.node | default('') }}/{{ pve_firewall_guest_res.type | default('') }}/{{ item.vmid }}/config"
+      - --current
+      - "1"
+      - --output-format
+      - json
+  loop: "{{ pve_firewall_guests }}"
+  loop_control:
+    label: "{{ item.vmid }}"
+  register: pve_firewall_guest_configs
+  changed_when: false
+  check_mode: false
+  failed_when: false
+  when: (item.vmid | int) in pve_firewall_guest_have
+  run_once: true
+
+- name: Read each declared guest's firewall file
+  ansible.builtin.slurp:
+    src: "/etc/pve/firewall/{{ item.vmid }}.fw"
+  loop: "{{ pve_firewall_guests }}"
+  loop_control:
+    label: "{{ item.vmid }}"
+  register: pve_firewall_guest_slurp
+  failed_when: >-
+    pve_firewall_guest_slurp is failed
+    and 'not found' not in (pve_firewall_guest_slurp.msg | default(''))
+  run_once: true
+
+- name: Start the list of guest files
+  ansible.builtin.set_fact:
+    pve_firewall_guest_files: []
+  run_once: true
+
+- name: Work out each guest's file
+  vars:
+    pve_firewall_guest: "{{ item.0 }}"
+    pve_firewall_guest_res: "{{ pve_firewall_guest_have[item.0.vmid | int] | default({}) }}"
+    pve_firewall_guest_cfg: "{{ (item.1.stdout | from_json) if (item.1.rc | default(1)) == 0 else {} }}"
+    pve_firewall_guest_wanted: "{{ lookup('ansible.builtin.template', 'guest.fw.j2', keep_trailing_newline=true) }}"
+    pve_firewall_guest_current: "{{ (item.2.content | b64decode) if item.2.content is defined else '' }}"
+  ansible.builtin.set_fact:
+    pve_firewall_guest_files: >-
+      {{ pve_firewall_guest_files + [{
+           'vmid': item.0.vmid | int,
+           'exists': pve_firewall_guest_res | length > 0,
+           'node': pve_firewall_guest_res.node | default(''),
+           'type': pve_firewall_guest_res.type | default(''),
+           'enable': item.0.enable | default(true) | bool | int,
+           'rule_count': (item.0.groups | default([]) | length) + (item.0.rules | default([]) | length),
+           'config_read': (item.1.rc | default(1)) == 0,
+           'nics_without_flag': pve_firewall_guest_cfg | dict2items
+                                | selectattr('key', 'match', '^net[0-9]+$')
+                                | rejectattr('value', 'search', '(^|,)firewall=1(,|$)')
+                                | map(attribute='key') | list,
+           'wanted': pve_firewall_guest_wanted,
+           'current': pve_firewall_guest_current,
+           'drift': pve_firewall_guest_wanted != pve_firewall_guest_current}] }}
+  loop: "{{ pve_firewall_guests | zip(pve_firewall_guest_configs.results, pve_firewall_guest_slurp.results) | list }}"
+  loop_control:
+    label: "{{ item.0.vmid }}"
+  run_once: true
+
+- name: List the guests whose file must change
+  ansible.builtin.set_fact:
+    pve_firewall_guest_drift: "{{ pve_firewall_guest_files | selectattr('drift') | map(attribute='vmid') | list }}"
+  run_once: true

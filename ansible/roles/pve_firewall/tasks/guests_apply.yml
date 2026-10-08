@@ -1,0 +1,51 @@
+---
+# Write each changed guest file and read it back. No rollback timer: a guest's
+# firewall cannot lock the operator out (pct enter and the console bypass it).
+
+- name: Write the guests' firewall files once
+  run_once: true
+  block:
+    - name: Write each changed guest file
+      ansible.builtin.command:
+        argv: [dd, "of=/etc/pve/firewall/{{ item.vmid }}.fw", bs=64K, iflag=fullblock, status=none]
+        stdin: "{{ item.wanted }}"
+        stdin_add_newline: false
+      loop: "{{ pve_firewall_guest_files | selectattr('drift') | list }}"
+      loop_control:
+        label: "{{ item.vmid }}"
+      changed_when: true
+
+    - name: Read the changed guests' firewall back through the API
+      ansible.builtin.command:
+        argv: [pvesh, get, "/nodes/{{ item.0.node }}/{{ item.0.type }}/{{ item.0.vmid }}/firewall/{{ item.1 }}", --output-format, json]
+      loop: "{{ pve_firewall_guest_files | selectattr('drift') | list | product(['options', 'rules']) | list }}"
+      loop_control:
+        label: "{{ item.0.vmid }} {{ item.1 }}"
+      register: pve_firewall_guest_verify
+      changed_when: false
+
+    - name: Assert each guest's options read back as declared
+      vars:
+        pve_firewall_guest_seen: "{{ item.stdout | from_json }}"
+      ansible.builtin.assert:
+        that:
+          - (pve_firewall_guest_seen.enable | default(0) | int) == item.item.0.enable
+          - pve_firewall_guest_seen.policy_in == 'DROP'
+        fail_msg: "Guest {{ item.item.0.vmid }} options read back as {{ pve_firewall_guest_seen }}"
+        quiet: true
+      loop: "{{ pve_firewall_guest_verify.results | selectattr('item.1', 'eq', 'options') | list }}"
+      loop_control:
+        label: "{{ item.item.0.vmid }}"
+
+    - name: Assert each guest's rules read back whole
+      vars:
+        pve_firewall_guest_seen: "{{ item.stdout | from_json }}"
+      ansible.builtin.assert:
+        that:
+          - pve_firewall_guest_seen | length == item.item.0.rule_count
+          - pve_firewall_guest_seen | selectattr('errors', 'defined') | list | length == 0
+        fail_msg: "Guest {{ item.item.0.vmid }} rules read back as {{ pve_firewall_guest_seen }}"
+        quiet: true
+      loop: "{{ pve_firewall_guest_verify.results | selectattr('item.1', 'eq', 'rules') | list }}"
+      loop_control:
+        label: "{{ item.item.0.vmid }}"

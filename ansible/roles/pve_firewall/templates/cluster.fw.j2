@@ -4,14 +4,27 @@ enable: {{ (pve_firewall_render_enable | default(pve_firewall_enable)) | bool | 
 policy_in: {{ pve_firewall_policy_in }}
 policy_out: {{ pve_firewall_policy_out }}
 
-[IPSET management] # Web UI and API, ping{{ '' if pve_firewall_ssh_from_anywhere | bool else ', SSH' }}
+{% for ipset in pve_firewall_all_ipsets %}
+[IPSET {{ ipset.name }}]{{ (' # ' ~ ipset.comment) if ipset.comment else '' }}
 
-{% for cidr in pve_firewall_management | sort %}
+{% for cidr in ipset.cidrs | sort(case_sensitive=true) %}
 {{ cidr }}
 {% endfor %}
 
+{% endfor %}
 [RULES]
 
 {% for rule in pve_firewall_rules %}
 {{ rule }}
+{% endfor %}
+{% if pve_firewall_groups | length > 0 %}
+
+{% endif %}
+{% for group in pve_firewall_groups | sort(attribute='name', case_sensitive=true) %}
+[group {{ group.name }}]{{ (' # ' ~ group.comment) if group.comment | default('') else '' }}
+
+{% for rule in group.rules | default([]) %}
+{{ rule }}
+{% endfor %}
+
 {% endfor %}

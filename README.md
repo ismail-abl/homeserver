@@ -19,7 +19,8 @@ entirely, with every change versioned, reviewable and checkable:
 - [ ] Container configs through `pct`: reverse proxy + fail2ban, SFTPGo
 - [x] Secrets with `ansible-vault`
 - [x] Firewall for the nodes: management from the LAN only, rollback if the controller is locked out
-- [ ] Network: bridges, SDN, firewall rules per guest
+- [x] Firewall per guest: each filtered guest accepts only its own service ports
+- [ ] Network: bridges, SDN
 - [ ] LXC templates and container provisioning
 
 ## Hardware
@@ -228,7 +229,8 @@ run it node by node (`--limit`).
   rules disabled and checks them; every change is written under a rollback
   timer and kept only once a new SSH connection and the web UI answer from
   every node. Otherwise the previous file comes back after three minutes.
-- **Guests are not filtered yet**: each guest's own firewall stays off;
-  per-guest rules are the next step.
-- **The whole file is declared**: a rule added in the web UI is removed at
-  the next run.
+- **Guests filtered one by one.** Security groups (web, torrent, DNS, media)
+  are declared once; each chosen guest drops everything else coming in. A
+  guest whose network card is not set to be filtered is refused, never edited.
+- **The whole file is declared**, and so are the declared guests' files: a
+  rule added in the web UI is removed at the next run.

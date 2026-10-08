@@ -80,3 +80,54 @@ pve_replication_target: node2
 # the vault). SSH from anywhere: logins are key-only.
 pve_firewall_management: "{{ lan_cidrs }}"
 pve_firewall_ssh_from_anywhere: true
+
+# The home LAN as an IP set guests' rules can name (+dc/lan).
+pve_firewall_ipsets:
+  lan: "{{ lan_cidrs }}"
+
+# What each filtered guest accepts. Everything else coming in is dropped.
+pve_firewall_groups:
+  - name: ping
+    comment: Ping from the LAN
+    rules:
+      - IN Ping(ACCEPT) -source +dc/lan
+  - name: web-public
+    comment: HTTP and HTTPS from anywhere
+    rules:
+      - IN HTTP(ACCEPT)
+      - IN HTTPS(ACCEPT)
+      - "IN ACCEPT -p udp -dport 443 # HTTP/3"
+  - name: torrent
+    comment: BitTorrent peers from anywhere
+    rules:
+      - IN ACCEPT -p tcp -dport 8099
+      - IN ACCEPT -p udp -dport 8099
+  - name: torrent-ui
+    comment: Torrent web UI from the LAN and the guests
+    rules:
+      - IN ACCEPT -source +dc/lan -p tcp -dport 8090
+      - IN ACCEPT -source +dc/homelan -p tcp -dport 8090
+  - name: dns
+    comment: DNS from the LAN and the guests
+    rules:
+      - IN DNS(ACCEPT) -source +dc/lan
+      - IN DNS(ACCEPT) -source +dc/homelan
+  - name: dns-ui
+    comment: DNS filter web UI from the LAN
+    rules:
+      - IN HTTP(ACCEPT) -source +dc/lan
+  - name: media
+    comment: Media apps from the guests (reverse proxy, apps among themselves)
+    rules:
+      - IN ACCEPT -source +dc/homelan -p tcp -dport 5055,7878,8096,8989,9696
+
+# Guests whose own firewall is on, added one at a time with their services checked after each.
+pve_firewall_guests:
+  - { vmid: 201, groups: [ping, torrent, torrent-ui] }
+  - { vmid: 999, groups: [ping, dns, dns-ui] }
+  - { vmid: 200, groups: [ping, web-public] }
+  - { vmid: 202, groups: [ping, media] }
+  - { vmid: 203, groups: [ping, media] }
+  - { vmid: 204, groups: [ping, media] }
+  - { vmid: 205, groups: [ping, media] }
+  - { vmid: 206, groups: [ping, media] }

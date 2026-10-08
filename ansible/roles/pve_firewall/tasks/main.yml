@@ -1,10 +1,45 @@
 ---
 # The datacenter firewall file lives in /etc/pve, which every node shares. The
-# reads and guards run on every node (each sees the controller's own address);
-# the write runs once.
+# node reads and guards run on every node (each sees the controller's own
+# address); the guest reads, the guest guards and every write run once.
+#
+# The guest tasks that follow the datacenter write carry the tag
+# pve_firewall_confirm, like the confirmation: --skip-tags pve_firewall_confirm
+# (the rollback test) then leaves the guests' files alone while the datacenter
+# rollback timer is armed.
 
 - name: Read the current state
   ansible.builtin.import_tasks: state.yml
+
+- name: Refuse a malformed guest declaration
+  # First, before the reads below use the declaration. vmids are integers and
+  # unique; groups and rules are lists (a string would be read letter by letter).
+  ansible.builtin.assert:
+    that:
+      - item.vmid is defined
+      - (item.vmid | string) is match('^[0-9]+$')
+      - (item.groups | default([])) | type_debug == 'list'
+      - (item.rules | default([])) | type_debug == 'list'
+    fail_msg: >-
+      Every pve_firewall_guests entry needs an integer vmid; its groups and
+      rules, when present, must be lists. Nothing was changed.
+    quiet: true
+  loop: "{{ pve_firewall_guests }}"
+  loop_control:
+    label: "{{ item.vmid | default('no vmid') }}"
+  run_once: true
+
+- name: Refuse a guest declared twice
+  vars:
+    pve_firewall_vmids: "{{ pve_firewall_guests | map(attribute='vmid') | map('string') | list }}"
+  ansible.builtin.assert:
+    that: pve_firewall_vmids | length == pve_firewall_vmids | unique | length
+    fail_msg: pve_firewall_guests declares the same vmid twice. Nothing was changed.
+    quiet: true
+  run_once: true
+
+- name: Read the declared guests' firewall files
+  ansible.builtin.import_tasks: guests_state.yml
 
 - name: Check the variables and the controller's address
   ansible.builtin.import_tasks: guards.yml
@@ -23,6 +58,17 @@
     content: "{{ pve_firewall_wanted }}"
     dest: /etc/pve/firewall/cluster.fw
     mode: "0640"
+  run_once: true
+  when: ansible_check_mode
+
+- name: Preview the guests' firewall files
+  ansible.builtin.copy:
+    content: "{{ item.wanted }}"
+    dest: "/etc/pve/firewall/{{ item.vmid }}.fw"
+    mode: "0640"
+  loop: "{{ pve_firewall_guest_files }}"
+  loop_control:
+    label: "{{ item.vmid }}"
   run_once: true
   when: ansible_check_mode
 
@@ -52,5 +98,28 @@
     that: not pve_firewall_drift
     fail_msg: The datacenter firewall file still differs from the declaration.
     quiet: true
+  when: not ansible_check_mode
+  tags: [pve_firewall_confirm]
+
+- name: Apply the guests' firewall files
+  ansible.builtin.include_tasks: guests_apply.yml
+  when:
+    - not ansible_check_mode
+    - pve_firewall_guest_drift | length > 0
+  tags: [pve_firewall_confirm]
+
+- name: Read the guests' state again
+  ansible.builtin.import_tasks: guests_state.yml
+  when: not ansible_check_mode
+  tags: [pve_firewall_confirm]
+
+- name: Assert the guests' files are as declared
+  ansible.builtin.assert:
+    that: pve_firewall_guest_drift | length == 0
+    fail_msg: >-
+      These guests' firewall files still differ:
+      {{ pve_firewall_guest_drift | join(', ') }}.
+    quiet: true
+  run_once: true
   when: not ansible_check_mode
   tags: [pve_firewall_confirm]

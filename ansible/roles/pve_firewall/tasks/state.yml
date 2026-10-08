@@ -49,6 +49,30 @@
                       | map(attribute='zone') | list)
          | map(attribute='vnet') | sort }}
 
+- name: Read the subnets of those networks
+  ansible.builtin.command:
+    argv: [pvesh, get, "/cluster/sdn/vnets/{{ item }}/subnets", --output-format, json]
+  loop: "{{ pve_firewall_dnsmasq_vnets }}"
+  register: pve_firewall_subnets_read
+  changed_when: false
+  check_mode: false
+
+- name: List every IP set of the datacenter file
+  ansible.builtin.set_fact:
+    pve_firewall_all_ipsets: >-
+      {%- set ns = namespace(out=[{'name': 'management',
+            'comment': 'Web UI and API, ping' ~ ('' if pve_firewall_ssh_from_anywhere | bool else ', SSH'),
+            'cidrs': pve_firewall_management}]) -%}
+      {%- for name, cidrs in pve_firewall_ipsets.items() -%}
+      {%- set ns.out = ns.out + [{'name': name, 'comment': '', 'cidrs': cidrs}] -%}
+      {%- endfor -%}
+      {%- for result in pve_firewall_subnets_read.results -%}
+      {%- set ns.out = ns.out + [{'name': result.item,
+            'comment': 'Subnets of the SDN network ' ~ result.item,
+            'cidrs': result.stdout | from_json | map(attribute='cidr') | list}] -%}
+      {%- endfor -%}
+      {{ ns.out | sort(attribute='name', case_sensitive=true) }}
+
 - name: Build the rules for the nodes
   ansible.builtin.set_fact:
     pve_firewall_rules: >-
