@@ -44,7 +44,6 @@
     upgrade: dist
     autoremove: true
     autoclean: true
-  notify: "Evaluate Reboot"
 
 - name: Install common utility packages
   ansible.builtin.apt:

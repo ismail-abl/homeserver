@@ -94,8 +94,12 @@ DHCP with the stock service off), systemd (lid switch, sleep targets), zram
 swap, CPU frequency policy, SSH, DNS and NTP. Every part is tagged (`system`,
 `apt`, `swap`, `cpu`, `sshd`, `dns_ntp`, `cron`, `subgid`), so it can be applied
 on its own. `apt` runs a
-dist-upgrade and reboots the node when `/var/run/reboot-required` appears, so
-run it node by node (`--limit`).
+dist-upgrade and, last, reboots the node when it needs it: a package asks for
+it, or the node does not run the kernel it would boot (Proxmox kernels never
+say so). The preview says `Would reboot` and why; with
+`host_baseline_reboot: false` a node only reports it, for a node whose guests
+should not go down unannounced. After a reboot, the role checks the node came
+back on that kernel.
 
 - **Swap is zram**, sized `max(ram / 8, 1024)` MiB by zram-generator at every
   boot (`host_baseline_zram_size`). The nodes have no swap on disk.

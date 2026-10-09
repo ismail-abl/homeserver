@@ -27,3 +27,8 @@ host_baseline_zram_size: "max(ram / 8, 1024)"
 # false keeps the CPU at its base clock: a cooler, quieter laptop.
 host_baseline_cpu_governor: performance
 host_baseline_cpu_boost: true
+
+# Reboot the node when it needs it: a package asks for it, or it does not run
+# the kernel a boot would pick. False only reports it and leaves the moment to
+# the operator (a node whose guests would all go down with it).
+host_baseline_reboot: true

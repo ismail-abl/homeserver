@@ -1,7 +1,7 @@
 ---
 # Each part is tagged, so it can be applied on its own, e.g.
 #   ansible-playbook playbooks/10-host-baseline.yml --tags dns_ntp
-# without the dist-upgrade (apt), which may reboot the node.
+# without the dist-upgrade (apt) and the reboot it may lead to.
 - name: System settings (logind, sleep targets)
   ansible.builtin.import_tasks: system.yml
   tags: [system]
@@ -33,3 +33,9 @@
 - name: Subgid for LXC bind mounts (placeholder)
   ansible.builtin.import_tasks: subgid.yml
   tags: [subgid]
+
+# Last, so every part above is applied first; tagged apt too, so a run limited
+# to another part never reboots.
+- name: Reboot when needed (a package asks for it, or a newer kernel)
+  ansible.builtin.import_tasks: reboot.yml
+  tags: [apt, reboot]

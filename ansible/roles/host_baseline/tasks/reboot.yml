@@ -1,0 +1,93 @@
+---
+# A node needs a reboot when a package asks for one (/var/run/reboot-required)
+# or when it does not run the kernel a boot would pick: Proxmox kernels never
+# create that file. A boot picks the kernel pinned with proxmox-boot-tool (for
+# the next boot only, or for good), else the newest one installed. Decided
+# last, once every other part and its handlers have run.
+- name: Run the pending handlers before deciding on a reboot
+  ansible.builtin.meta: flush_handlers
+
+- name: Check whether a package asks for a reboot
+  ansible.builtin.stat:
+    path: /var/run/reboot-required
+  register: host_baseline_reboot_flag
+
+- name: List the installed kernels
+  ansible.builtin.find:
+    paths: /boot
+    patterns: vmlinuz-*
+  register: host_baseline_kernels
+
+- name: Find the kernel pins
+  ansible.builtin.find:
+    paths: /etc/kernel
+    patterns: [next-boot-pin, proxmox-boot-pin]
+  register: host_baseline_pin_files
+
+- name: Read the kernel pins
+  # Sorted by path, next-boot-pin comes first: it wins over the lasting pin.
+  ansible.builtin.slurp:
+    src: "{{ item }}"
+  loop: "{{ host_baseline_pin_files.files | map(attribute='path') | sort }}"
+  register: host_baseline_pins
+
+- name: Work out the kernel a boot would pick and the reasons to reboot
+  vars:
+    host_baseline_kernel_newest: >-
+      {{ host_baseline_kernels.files | map(attribute='path') | map('basename')
+         | map('regex_replace', '^vmlinuz-', '')
+         | community.general.version_sort | last }}
+    host_baseline_kernel_pinned: >-
+      {{ host_baseline_pins.results | map(attribute='content') | map('b64decode')
+         | map('trim') | select | first | default('') }}
+    host_baseline_kernel_next: "{{ host_baseline_kernel_pinned or host_baseline_kernel_newest }}"
+  ansible.builtin.set_fact:
+    host_baseline_kernel_expected: "{{ host_baseline_kernel_next }}"
+    host_baseline_reboot_reasons: >-
+      {{ (['a package asks for it'] if host_baseline_reboot_flag.stat.exists else [])
+         + (['running kernel ' ~ ansible_facts['kernel'] ~ ', a boot would pick '
+             ~ host_baseline_kernel_next]
+            if ansible_facts['kernel'] != host_baseline_kernel_next else []) }}
+
+- name: Report a reboot that this run will not do
+  vars:
+    host_baseline_reboot_report: >-
+      {{ 'Would reboot' if host_baseline_reboot | bool
+         else 'Reboot needed, left to the operator (host_baseline_reboot is false)' }}
+  ansible.builtin.debug:
+    msg: "{{ host_baseline_reboot_report }}: {{ host_baseline_reboot_reasons | join('; ') }}."
+  changed_when: true
+  when:
+    - host_baseline_reboot_reasons | length > 0
+    - ansible_check_mode or not host_baseline_reboot | bool
+
+- name: Reboot the node
+  ansible.builtin.reboot:
+    msg: "Reboot initiated by Ansible: {{ host_baseline_reboot_reasons | join('; ') }}"
+    connect_timeout: 5
+    reboot_timeout: 600
+    pre_reboot_delay: 0
+    post_reboot_delay: 30
+    test_command: whoami
+  register: host_baseline_rebooted
+  when:
+    - host_baseline_reboot_reasons | length > 0
+    - host_baseline_reboot | bool
+    - not ansible_check_mode
+
+- name: Check that the node came back on the expected kernel
+  when: host_baseline_rebooted.rebooted | default(false)
+  block:
+    - name: Read the running kernel after the reboot
+      ansible.builtin.command: uname -r
+      register: host_baseline_kernel_after
+      changed_when: false
+
+    - name: Assert the node runs the kernel a boot would pick
+      ansible.builtin.assert:
+        that: host_baseline_kernel_after.stdout == host_baseline_kernel_expected
+        fail_msg: >-
+          {{ inventory_hostname }} came back on {{ host_baseline_kernel_after.stdout }},
+          not {{ host_baseline_kernel_expected }}: check GRUB's default entry and the
+          pins (proxmox-boot-tool kernel list), or the next run reboots it again.
+        quiet: true

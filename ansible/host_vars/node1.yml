@@ -5,3 +5,7 @@
 # production, while node2 alone never has quorum, so there is no split-brain.
 # The price: HA can move guests to node1, never fail node1's guests over.
 pve_cluster_votes: 3
+
+# Production: every guest goes down with a reboot, so the baseline only
+# reports a pending one; the operator picks the moment.
+host_baseline_reboot: false

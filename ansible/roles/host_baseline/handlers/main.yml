@@ -18,23 +18,6 @@
     name: chrony
     state: restarted
 
-- name: Check if a reboot is required
-  ansible.builtin.stat:
-    path: /var/run/reboot-required
-  register: host_baseline_reboot_required
-  listen: "Evaluate Reboot"
-
-- name: Reboot the server if required
-  ansible.builtin.reboot:
-    msg: "Reboot initiated by Ansible after dist-upgrade"
-    connect_timeout: 5
-    reboot_timeout: 600
-    pre_reboot_delay: 0
-    post_reboot_delay: 30
-    test_command: whoami
-  when: host_baseline_reboot_required.stat.exists | default(false)
-  listen: "Evaluate Reboot"
-
 # Reconfiguring zram is stop, then one start. A restart of the setup service
 # races with the swap unit it restarts in turn (and with udev events from the
 # reformatted device): several starts of dev-zram0.swap hit its start limit and
