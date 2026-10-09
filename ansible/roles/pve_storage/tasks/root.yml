@@ -1,0 +1,10 @@
+---
+# The installer sizes the root LV itself (maxroot only caps it) and leaves
+# the rest of its volume group free. Grown online, ext4 with it; never shrunk.
+- name: Extend the root LV over its whole volume group
+  community.general.lvol:
+    vg: "{{ pve_storage_root_vg }}"
+    lv: "{{ pve_storage_root_lv }}"
+    size: +100%FREE
+    resizefs: true
+    shrink: false

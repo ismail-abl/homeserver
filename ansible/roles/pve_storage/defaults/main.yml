@@ -29,3 +29,9 @@ pve_storage_arc_max_mib: 1024
 # hostid) is imported only when this is set for the run:
 #   -e pve_storage_force_import=true
 pve_storage_force_import: false
+
+# The installer's volume group and root LV (ext4 install). The root is grown
+# over the whole volume group; the guest pool lives outside it, at the end of
+# the disk.
+pve_storage_root_vg: pve
+pve_storage_root_lv: root

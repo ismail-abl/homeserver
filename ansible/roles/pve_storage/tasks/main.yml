@@ -1,6 +1,10 @@
 ---
 # Each part is tagged, so it can be applied on its own, e.g.
 #   ansible-playbook playbooks/30-pve-storage.yml --tags arc
+- name: Root LV over its whole volume group
+  ansible.builtin.import_tasks: root.yml
+  tags: [root]
+
 - name: ZFS pool and Proxmox storage
   ansible.builtin.import_tasks: pool.yml
   tags: [pool]

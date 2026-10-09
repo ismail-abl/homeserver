@@ -50,8 +50,7 @@ with the repository under `/mnt/c`, mount it with `metadata` in
 **Installation.** ext4, and in the disk options `hdsize 128`, `swapsize 0`,
 `maxroot 128`, `minfree 0`, `maxvz 0`: the end of the disk stays unpartitioned
 for the guest pool. The installer sizes the root itself (`maxroot` only caps
-it), so extend it over its volume group afterwards:
-`lvextend -r -l +100%FREE pve/root`.
+it); the storage playbook then grows it over its volume group.
 
 **New node.** A fresh Proxmox node only has its root password. Trust its host
 key once (`ssh root@<ip> true`, checking the fingerprint on its console), then
@@ -145,6 +144,8 @@ run it node by node (`--limit`).
 
 ### `pve_storage`
 
+- **The root LV fills its volume group**, grown online with its ext4 (tag
+  `root`), never shrunk: the installer leaves part of the volume group free.
 - **One pool for guest disks, `pve-data`, also the storage ID**, in its own
   partition at the unpartitioned end of the system disk. The partition is found
   by its GPT name (`zfs-pve-data`), so a reinstall of Proxmox leaves the pool
