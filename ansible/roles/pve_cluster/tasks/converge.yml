@@ -13,6 +13,17 @@
   failed_when: false
   check_mode: false
 
+- name: Note whether this run can only preview the cluster
+  # In check mode, a node not yet a member stays out (build.yml skipped
+  # pvecm create/add and reported it), so every node, members included, would
+  # fail the node count below. build.yml's report is the preview then.
+  ansible.builtin.set_fact:
+    pve_cluster_preview_only: >-
+      {{ ansible_check_mode
+         and (groups[pve_cluster_group]
+              | map('extract', hostvars, ['pve_cluster_conf', 'stat', 'exists'])
+              | reject | list | length > 0) }}
+
 - name: Assert the cluster is formed, named and quorate
   ansible.builtin.assert:
     that:
@@ -25,6 +36,7 @@
       on {{ inventory_hostname }}. build.yml only creates a missing cluster and joins
       nodes that have none; a node that belongs to another cluster, or a broken one,
       needs the destructive path: -e pve_cluster_wipe=true.
+  when: not pve_cluster_preview_only | bool
 
 - name: Assert the quorum votes match the inventory
   # Votes are only set when a node is created or joined; the role does not edit
@@ -38,6 +50,7 @@
       cluster should expect {{ pve_cluster_expected_votes }} in total. A node still
       listed in corosync.conf but gone from the inventory also shows up here
       (`pvecm delnode <name>`).
+  when: not pve_cluster_preview_only | bool
 
 - name: Check that the bootstrap node's configuration survived the wipe
   # Only after a wipe that dissolved an existing cluster: wipe.yml recorded the

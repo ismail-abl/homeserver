@@ -11,6 +11,19 @@
     path: /etc/pve/corosync.conf
   register: pve_cluster_conf
 
+- name: Report what a real run would do (check mode)
+  # Check mode skips pvecm create/add (command), so converge.yml could only
+  # find a node without a cluster. Say what would happen instead.
+  ansible.builtin.debug:
+    msg: >-
+      {{ 'Would create the cluster ' ~ pve_cluster_name
+         if inventory_hostname == pve_cluster_bootstrap_node
+         else 'Would join the cluster through ' ~ pve_cluster_bootstrap_node }}
+  changed_when: true
+  when:
+    - ansible_check_mode
+    - not pve_cluster_conf.stat.exists
+
 - name: Form the cluster on the bootstrap node
   when:
     - inventory_hostname == pve_cluster_bootstrap_node
