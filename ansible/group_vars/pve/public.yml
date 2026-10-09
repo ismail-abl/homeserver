@@ -91,6 +91,12 @@ pve_firewall_groups:
     comment: Ping from the LAN
     rules:
       - IN Ping(ACCEPT) -source +dc/lan
+  # The LAN cannot reach homelan (host-internal): a guest there is pinged by
+  # the node (its homelan address) or by another guest.
+  - name: ping-homelan
+    comment: Ping from the node and the guests on homelan
+    rules:
+      - IN Ping(ACCEPT) -source +dc/homelan
   - name: web-public
     comment: HTTP and HTTPS from anywhere
     rules:
@@ -137,12 +143,12 @@ pve_firewall_groups:
 pve_firewall_guests:
   - { vmid: 201, groups: [ping, torrent, torrent-ui] }
   - { vmid: 999, groups: [ping, dns, dns-ui] }
-  - { vmid: 200, groups: [ping, web-public] }
-  - { vmid: 202, groups: [ping, media] }
-  - { vmid: 203, groups: [ping, media] }
-  - { vmid: 204, groups: [ping, media] }
-  - { vmid: 205, groups: [ping, media] }
-  - { vmid: 206, groups: [ping, media] }
-  - { vmid: 101, groups: [ping] }
-  - { vmid: 199, groups: [ping, sftpgo-web] }
+  - { vmid: 200, groups: [ping, ping-homelan, web-public] }
+  - { vmid: 202, groups: [ping-homelan, media] }
+  - { vmid: 203, groups: [ping-homelan, media] }
+  - { vmid: 204, groups: [ping-homelan, media] }
+  - { vmid: 205, groups: [ping-homelan, media] }
+  - { vmid: 206, groups: [ping-homelan, media] }
+  - { vmid: 101, groups: [ping-homelan] }
+  - { vmid: 199, groups: [ping-homelan, sftpgo-web] }
   - { vmid: 1000, groups: [ping, lan-all] }
