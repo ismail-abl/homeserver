@@ -229,8 +229,10 @@ run it node by node (`--limit`).
   rules disabled and checks them; every change is written under a rollback
   timer and kept only once a new SSH connection and the web UI answer from
   every node. Otherwise the previous file comes back after three minutes.
-- **Guests filtered one by one.** Security groups (web, torrent, DNS, media)
-  are declared once; each chosen guest drops everything else coming in. A
+- **Guests filtered one by one.** Security groups (web, torrent, DNS, media,
+  file transfer) are declared once; each chosen guest drops everything else
+  coming in. Home automation, which discovers devices on its own, accepts
+  the home network and nothing from the internet. A
   guest whose network card is not set to be filtered is refused, never edited.
 - **The whole file is declared**, and so are the declared guests' files: a
   rule added in the web UI is removed at the next run.

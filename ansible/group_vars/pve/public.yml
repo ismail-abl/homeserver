@@ -120,6 +120,18 @@ pve_firewall_groups:
     comment: Media apps from the guests (reverse proxy, apps among themselves)
     rules:
       - IN ACCEPT -source +dc/homelan -p tcp -dport 5055,7878,8096,8989,9696
+  - name: sftpgo-web
+    comment: File transfer web UI and WebDAV from the reverse proxy
+    rules:
+      - IN ACCEPT -source +dc/homelan -p tcp -dport 8080,10080
+  # Home automation discovers devices by itself: their replies come back as
+  # new flows on ephemeral ports, so per-port rules would break it. Link-local
+  # sources never cross a router: they can only come from the home LAN.
+  - name: lan-all
+    comment: Everything from the LAN, nothing from elsewhere
+    rules:
+      - IN ACCEPT -source +dc/lan
+      - "IN ACCEPT -source fe80::/10 # link-local, mDNS over IPv6"
 
 # Guests whose own firewall is on, added one at a time with their services checked after each.
 pve_firewall_guests:
@@ -131,3 +143,6 @@ pve_firewall_guests:
   - { vmid: 204, groups: [ping, media] }
   - { vmid: 205, groups: [ping, media] }
   - { vmid: 206, groups: [ping, media] }
+  - { vmid: 101, groups: [ping] }
+  - { vmid: 199, groups: [ping, sftpgo-web] }
+  - { vmid: 1000, groups: [ping, lan-all] }
